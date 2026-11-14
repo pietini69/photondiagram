@@ -1152,6 +1152,8 @@ fn parse_visio_shape(
         is_room_area: false,
         locked: false,
         text_position: TextPosition::Auto,
+        font_size: 0.0,
+        text_align: crate::model::TextAlign::Auto,
     });
 }
 

@@ -1,4 +1,4 @@
-use crate::model::{ConnectionPort, DiagramShape, PortDir, PrimOp, TextPosition};
+use crate::model::{ConnectionPort, DiagramShape, PortDir, PrimOp, TextAlign, TextPosition};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -98,6 +98,8 @@ impl StencilItem {
             is_room_area: self.is_room_area,
             locked: false,
             text_position: TextPosition::Auto,
+            font_size: 0.0,
+            text_align: TextAlign::Auto,
         }
     }
 }
@@ -1374,6 +1376,58 @@ pub fn builtin_stencils() -> Vec<StencilItem> {
             is_dimension: false,
             is_room_area: false,
         },
+        StencilItem {
+            id: "note_textbox".into(),
+            name: "Tekstilaatikko (Vapaa teksti)".into(),
+            category: StencilCategory::FlowAndNet,
+            default_label: "Kirjoita teksti...".into(),
+            default_value: "".into(),
+            default_width_mm: 60.0,
+            default_height_mm: 25.0,
+            default_layer: "Mitat & Tekstit".into(),
+            stroke_color: [148, 163, 184, 180],
+            fill_color: [255, 255, 255, 230],
+            stroke_width: 1.2,
+            ports: four_cardinal_ports(),
+            geometry: vec![PrimOp::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+                filled: true,
+            }],
+            is_dimension: false,
+            is_room_area: false,
+        },
+        StencilItem {
+            id: "note_callout".into(),
+            name: "Huomautuskupla (Callout)".into(),
+            category: StencilCategory::FlowAndNet,
+            default_label: "Huomautus!".into(),
+            default_value: "".into(),
+            default_width_mm: 55.0,
+            default_height_mm: 30.0,
+            default_layer: "Mitat & Tekstit".into(),
+            stroke_color: [217, 119, 6, 255],
+            fill_color: [254, 243, 199, 240],
+            stroke_width: 1.5,
+            ports: four_cardinal_ports(),
+            geometry: vec![PrimOp::Polyline {
+                points: vec![
+                    (0.0, 0.0),
+                    (1.0, 0.0),
+                    (1.0, 0.75),
+                    (0.45, 0.75),
+                    (0.28, 1.0),
+                    (0.35, 0.75),
+                    (0.0, 0.75),
+                ],
+                closed: true,
+                filled: true,
+            }],
+            is_dimension: false,
+            is_room_area: false,
+        },
     ]
 }
 
@@ -1389,6 +1443,8 @@ pub fn instantiate_shape(
     instance_num: usize,
 ) -> Option<DiagramShape> {
     let normalized = match stencil_id {
+        "text" | "textbox" | "note_text" => "note_textbox".to_string(),
+        "callout" | "note" => "note_callout".to_string(),
         "plc_block" => "net_plc".to_string(),
         "fp_door_single" => "floor_door_right".to_string(),
         "fp_sink" => "furn_sink_kitchen".to_string(),

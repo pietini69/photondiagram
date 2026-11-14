@@ -602,6 +602,8 @@ fn parse_lbrn2_shapes(
                         is_room_area: false,
                         locked: false,
                         text_position: crate::model::TextPosition::Auto,
+                        font_size: 0.0,
+                        text_align: crate::model::TextAlign::Auto,
                     };
                     *next_id += 1;
                     out.push(s);
@@ -651,6 +653,8 @@ fn parse_lbrn2_shapes(
                     is_room_area: false,
                     locked: false,
                     text_position: crate::model::TextPosition::Auto,
+                    font_size: 0.0,
+                    text_align: crate::model::TextAlign::Auto,
                 };
                 *next_id += 1;
                 out.push(s);
@@ -694,6 +698,8 @@ fn parse_lbrn2_shapes(
                         is_room_area: false,
                         locked: false,
                         text_position: crate::model::TextPosition::Auto,
+                        font_size: 0.0,
+                        text_align: crate::model::TextAlign::Auto,
                     };
                     *next_id += 1;
                     out.push(s);
@@ -757,6 +763,8 @@ fn parse_lbrn2_shapes(
                                 is_room_area: false,
                                 locked: false,
                                 text_position: crate::model::TextPosition::Auto,
+                                font_size: 0.0,
+                                text_align: crate::model::TextAlign::Auto,
                             };
                             *next_id += 1;
                             out.push(s);

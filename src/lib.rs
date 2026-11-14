@@ -375,4 +375,33 @@ mod tests {
         icon_shape.text_position = TextPosition::Center;
         assert_eq!(icon_shape.label_position(), Point::new(50.0, 50.0));
     }
+
+    #[test]
+    fn test_textbox_and_callout_components() {
+        use crate::model::{TextAlign, TextPosition};
+        use crate::stencils::instantiate_shape;
+
+        // 1. Textbox stencil instantiated via "text" or "note_textbox"
+        let tb = instantiate_shape("text", 101, 120.0, 80.0, 1).expect("Failed to create textbox");
+        assert_eq!(tb.stencil_id, "note_textbox");
+        assert_eq!(tb.effective_text_position(), TextPosition::Center);
+        assert_eq!(tb.effective_text_align(), TextAlign::Left);
+        assert_eq!(tb.font_size, 0.0);
+        assert_eq!(tb.width, 60.0);
+        assert_eq!(tb.height, 25.0);
+        assert_eq!(tb.layer, "Mitat & Tekstit");
+
+        // 2. Callout stencil instantiated via "callout" or "note_callout"
+        let co = instantiate_shape("callout", 102, 140.0, 90.0, 1).expect("Failed to create callout");
+        assert_eq!(co.stencil_id, "note_callout");
+        assert_eq!(co.effective_text_position(), TextPosition::Center);
+        assert_eq!(co.layer, "Mitat & Tekstit");
+
+        // 3. Custom text alignment and font size
+        let mut custom = tb;
+        custom.text_align = TextAlign::Right;
+        assert_eq!(custom.effective_text_align(), TextAlign::Right);
+        custom.font_size = 14.5;
+        assert_eq!(custom.font_size, 14.5);
+    }
 }

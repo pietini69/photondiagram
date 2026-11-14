@@ -2,7 +2,7 @@ use crate::formats::export::shape_display_caption;
 use crate::formats::{load_document_from_path, load_stencil_library, save_document_to_path};
 use crate::model::{
     ArrowType, ConnectorStyle, DiagramConnector, DiagramDocument, DiagramPage, DiagramShape,
-    DrawingScale, Point, PrimOp, TextPosition,
+    DrawingScale, Point, PrimOp, TextAlign, TextPosition,
 };
 use crate::routing::{connector_hit_test, find_wire_jumps, update_all_connectors};
 use crate::stencils::{built_in_stencils, instantiate_shape, StencilCategory, StencilItem};
@@ -18,6 +18,7 @@ use std::path::PathBuf;
 pub enum ActiveTool {
     Select,
     Wire,
+    DrawText,
     DrawWall,
     DrawRoom,
     DrawDimension,
@@ -579,6 +580,7 @@ impl PhotonVisionApp {
                 for (tool, label) in [
                     (ActiveTool::Select, "↖ Valitse"),
                     (ActiveTool::Wire, "🔌 Johdin"),
+                    (ActiveTool::DrawText, "🔤 Teksti"),
                     (ActiveTool::DrawWall, "🧱 Seinä"),
                     (ActiveTool::DrawRoom, "🏠 Huone (m²)"),
                     (ActiveTool::DrawDimension, "📏 Mittaviiva"),
@@ -850,6 +852,43 @@ impl PhotonVisionApp {
                                     });
                                 ui.end_row();
 
+                                ui.label("Tekstin tasaus:");
+                                egui::ComboBox::from_id_salt("shape_text_align_combo")
+                                    .selected_text(match shape.text_align {
+                                        TextAlign::Auto => "Automaattinen",
+                                        TextAlign::Left => "Vasen",
+                                        TextAlign::Center => "Keskitetty",
+                                        TextAlign::Right => "Oikea",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut shape.text_align, TextAlign::Auto, "Automaattinen");
+                                        ui.selectable_value(&mut shape.text_align, TextAlign::Left, "Vasen");
+                                        ui.selectable_value(&mut shape.text_align, TextAlign::Center, "Keskitetty");
+                                        ui.selectable_value(&mut shape.text_align, TextAlign::Right, "Oikea");
+                                    });
+                                ui.end_row();
+
+                                ui.label("Fonttikoko:");
+                                ui.horizontal(|ui| {
+                                    if shape.font_size <= 0.0 {
+                                        if ui.button("Auto (Oletus)").clicked() {
+                                            shape.font_size = 11.0;
+                                        }
+                                        ui.label(egui::RichText::new("Auto").weak());
+                                    } else {
+                                        ui.add(
+                                            egui::DragValue::new(&mut shape.font_size)
+                                                .speed(0.5)
+                                                .range(6.0..=72.0)
+                                                .suffix(" pt"),
+                                        );
+                                        if ui.small_button("Auto").clicked() {
+                                            shape.font_size = 0.0;
+                                        }
+                                    }
+                                });
+                                ui.end_row();
+
                                 ui.label("Sijainti X (mm):");
                                 ui.add(egui::DragValue::new(&mut shape.x).speed(0.5));
                                 ui.end_row();
@@ -916,27 +955,46 @@ impl PhotonVisionApp {
                                 ui.end_row();
 
                                 ui.label("Viivaväri:");
-                                let mut sc = Color32::from_rgba_unmultiplied(
-                                    shape.stroke_color[0],
-                                    shape.stroke_color[1],
-                                    shape.stroke_color[2],
-                                    shape.stroke_color[3],
-                                );
-                                if ui.color_edit_button_srgba(&mut sc).changed() {
-                                    shape.stroke_color = sc.to_srgba_unmultiplied();
-                                }
+                                ui.horizontal(|ui| {
+                                    let mut sc = Color32::from_rgba_unmultiplied(
+                                        shape.stroke_color[0],
+                                        shape.stroke_color[1],
+                                        shape.stroke_color[2],
+                                        shape.stroke_color[3],
+                                    );
+                                    if ui.color_edit_button_srgba(&mut sc).changed() {
+                                        shape.stroke_color = sc.to_srgba_unmultiplied();
+                                    }
+                                    if shape.stroke_color[3] == 0 {
+                                        if ui.small_button("Näytä viiva").clicked() {
+                                            shape.stroke_color = [148, 163, 184, 180];
+                                            shape.stroke_width = 1.2;
+                                        }
+                                    } else if ui.small_button("Ei viivaa").clicked() {
+                                        shape.stroke_color[3] = 0;
+                                    }
+                                });
                                 ui.end_row();
 
                                 ui.label("Täyttöväri:");
-                                let mut fc = Color32::from_rgba_unmultiplied(
-                                    shape.fill_color[0],
-                                    shape.fill_color[1],
-                                    shape.fill_color[2],
-                                    shape.fill_color[3],
-                                );
-                                if ui.color_edit_button_srgba(&mut fc).changed() {
-                                    shape.fill_color = fc.to_srgba_unmultiplied();
-                                }
+                                ui.horizontal(|ui| {
+                                    let mut fc = Color32::from_rgba_unmultiplied(
+                                        shape.fill_color[0],
+                                        shape.fill_color[1],
+                                        shape.fill_color[2],
+                                        shape.fill_color[3],
+                                    );
+                                    if ui.color_edit_button_srgba(&mut fc).changed() {
+                                        shape.fill_color = fc.to_srgba_unmultiplied();
+                                    }
+                                    if shape.fill_color[3] == 0 {
+                                        if ui.small_button("Valkoinen tausta").clicked() {
+                                            shape.fill_color = [255, 255, 255, 240];
+                                        }
+                                    } else if ui.small_button("Läpinäkyvä").clicked() {
+                                        shape.fill_color = [0, 0, 0, 0];
+                                    }
+                                });
                                 ui.end_row();
 
                                 ui.label("Taso (Layer):");
@@ -1324,13 +1382,19 @@ impl PhotonVisionApp {
 
                 let page = self.doc.current_page_mut();
                 if let Some(shape) = page.shapes.iter_mut().find(|s| s.id == edit_id) {
+                    let is_note = shape.stencil_id.starts_with("note_")
+                        || shape.stencil_id == "note_textbox"
+                        || shape.stencil_id == "note_callout"
+                        || shape.name.to_lowercase().contains("teksti");
+                    let (dlg_w, rows) = if is_note { (380.0, 6) } else { (300.0, 3) };
+
                     egui::Window::new(title)
                         .open(&mut is_open)
                         .id(egui::Id::new("shape_text_edit_modal_dialog"))
                         .default_pos(center_sp + Vec2::new(15.0, -25.0))
                         .collapsible(false)
-                        .resizable(false)
-                        .default_width(300.0)
+                        .resizable(true)
+                        .default_width(dlg_w)
                         .order(egui::Order::Foreground)
                         .show(ctx, |ui| {
                             ui.add_space(2.0);
@@ -1343,7 +1407,7 @@ impl PhotonVisionApp {
                             let te = egui::TextEdit::multiline(&mut shape.label)
                                 .id_salt("dialog_shape_label_field")
                                 .desired_width(f32::INFINITY)
-                                .desired_rows(3)
+                                .desired_rows(rows)
                                 .cursor_at_end(true)
                                 .hint_text("Kirjoita teksti...");
                             let te_res = ui.add(te);
@@ -1354,10 +1418,16 @@ impl PhotonVisionApp {
                             }
 
                             // Shortcuts:
-                            // Enter = Valmis (unless Shift is held for newline)
                             // Escape = Valmis / Sulje
+                            // For notes: Cmd/Ctrl+Enter = Valmis; Enter = Uusi rivi
+                            // For other shapes: Enter = Valmis (unless Shift is held)
                             if ui.input(|i| i.key_pressed(Key::Escape)) {
                                 close_editor = true;
+                            } else if is_note {
+                                if ui.input(|i| i.key_pressed(Key::Enter) && (i.modifiers.command || i.modifiers.ctrl)) {
+                                    shape.label = shape.label.trim_end_matches('\n').to_string();
+                                    close_editor = true;
+                                }
                             } else if ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift) {
                                 shape.label = shape.label.trim_end_matches('\n').to_string();
                                 close_editor = true;
@@ -1374,9 +1444,14 @@ impl PhotonVisionApp {
                                 if ui.button("Tyhjennä").clicked() {
                                     shape.label.clear();
                                 }
+                                let hint = if is_note {
+                                    "Cmd+Enter = Valmis • Enter = Rivi"
+                                } else {
+                                    "Enter = Valmis • Shift+Enter = Rivi"
+                                };
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     ui.label(
-                                        egui::RichText::new("Enter = Valmis • Shift+Enter = Rivi")
+                                        egui::RichText::new(hint)
                                             .weak()
                                             .small(),
                                     );
@@ -1410,8 +1485,27 @@ impl PhotonVisionApp {
             return;
         };
 
-        // 1. Place armed stencil on click
+        // 1. Place armed stencil on click or place text box
         if response.clicked() {
+            if self.active_tool == ActiveTool::DrawText {
+                self.push_undo();
+                let new_id = self.doc.alloc_id();
+                let count = self.doc.current_page().shapes.len() + 1;
+                let snapped = self.snap_point(cur_mm);
+                if let Some(mut shape) = instantiate_shape("note_textbox", new_id, snapped.x, snapped.y, count) {
+                    shape.width = 60.0;
+                    shape.height = 25.0;
+                    shape.label.clear();
+                    self.doc.current_page_mut().shapes.push(shape);
+                    self.selected_shape_id = Some(new_id);
+                    self.selected_connector_id = None;
+                    self.editing_shape_id = Some(new_id);
+                    self.focus_text_edit = true;
+                    self.active_tool = ActiveTool::Select;
+                }
+                return;
+            }
+
             if let Some(st_id) = self.pending_stencil_id.clone() {
                 self.push_undo();
                 let new_id = self.doc.alloc_id();
@@ -1456,7 +1550,10 @@ impl PhotonVisionApp {
             }
             if matches!(
                 self.active_tool,
-                ActiveTool::DrawWall | ActiveTool::DrawRoom | ActiveTool::DrawDimension
+                ActiveTool::DrawWall
+                    | ActiveTool::DrawRoom
+                    | ActiveTool::DrawDimension
+                    | ActiveTool::DrawText
             ) {
                 self.creation_drag_start_mm = Some(self.snap_point(cur_mm));
                 return;
@@ -1627,18 +1724,20 @@ impl PhotonVisionApp {
                 }
             }
 
-            // Finish Wall / Room / Dimension creation drag
+            // Finish Wall / Room / Dimension / Text creation drag
             if let Some(start_mm) = self.creation_drag_start_mm.take() {
                 let end_mm = self.snap_point(cur_mm);
                 let cx = (start_mm.x + end_mm.x) * 0.5;
                 let cy = (start_mm.y + end_mm.y) * 0.5;
-                let w = (end_mm.x - start_mm.x).abs().max(6.0);
-                let h = (end_mm.y - start_mm.y).abs().max(4.0);
+                let drag_dist = start_mm.distance_to(end_mm);
+                let w = (end_mm.x - start_mm.x).abs();
+                let h = (end_mm.y - start_mm.y).abs();
 
                 let st_id = match self.active_tool {
                     ActiveTool::DrawWall => Some("fp_wall_ext"),
                     ActiveTool::DrawRoom => Some("fp_room"),
                     ActiveTool::DrawDimension => Some("fp_dimension"),
+                    ActiveTool::DrawText => Some("note_textbox"),
                     _ => None,
                 };
                 if let Some(stid) = st_id {
@@ -1648,7 +1747,7 @@ impl PhotonVisionApp {
                     if let Some(mut sh) = instantiate_shape(stid, id, cx, cy, count) {
                         if self.active_tool == ActiveTool::DrawWall {
                             if w >= h {
-                                sh.width = w;
+                                sh.width = w.max(6.0);
                                 sh.height = 4.0;
                             } else {
                                 sh.width = w.max(6.0);
@@ -1656,14 +1755,27 @@ impl PhotonVisionApp {
                                 sh.rotation_deg = 90.0;
                             }
                         } else if self.active_tool == ActiveTool::DrawDimension {
-                            sh.width = w.max(h);
+                            sh.width = w.max(h).max(6.0);
                             sh.height = 8.0;
                             if h > w {
                                 sh.rotation_deg = 90.0;
                             }
+                        } else if self.active_tool == ActiveTool::DrawText {
+                            if drag_dist >= 4.0 {
+                                sh.width = w.max(20.0);
+                                sh.height = h.max(12.0);
+                            } else {
+                                sh.width = 60.0;
+                                sh.height = 25.0;
+                                sh.x = start_mm.x;
+                                sh.y = start_mm.y;
+                            }
+                            sh.label.clear();
+                            self.editing_shape_id = Some(id);
+                            self.focus_text_edit = true;
                         } else {
-                            sh.width = w;
-                            sh.height = h;
+                            sh.width = w.max(6.0);
+                            sh.height = h.max(4.0);
                         }
                         self.doc.current_page_mut().shapes.push(sh);
                         self.selected_shape_id = Some(id);
@@ -1944,24 +2056,89 @@ impl PhotonVisionApp {
                 } else if has_fill && fill_lum > 0.82 {
                     // Dark navy on light pastel fills
                     Color32::from_rgb(15, 23, 42)
+                } else if shape.fill_color[3] == 0 && shape.stroke_color[3] == 0 {
+                    Color32::from_rgb(15, 23, 42)
                 } else {
                     stroke_col
                 };
 
-                let line_count = caption.lines().count().max(1) as f32;
-                let h_px = (shape.height as f32) * self.zoom_px_per_mm;
-                let font_size = (h_px / (line_count + 0.9)).clamp(9.0, 18.0);
+                let font_size = if shape.font_size > 0.0 {
+                    (shape.font_size * 0.3528 * self.zoom_px_per_mm).clamp(6.0, 150.0)
+                } else if shape.stencil_id.starts_with("note_")
+                    || shape.stencil_id == "note_textbox"
+                    || shape.name.to_lowercase().contains("teksti")
+                {
+                    (11.0 * 0.3528 * self.zoom_px_per_mm).clamp(9.0, 24.0)
+                } else {
+                    let line_count = caption.lines().count().max(1) as f32;
+                    let h_px = (shape.height as f32) * self.zoom_px_per_mm;
+                    (h_px / (line_count + 0.9)).clamp(9.0, 24.0)
+                };
                 (col, font_size)
             } else {
-                (stroke_col, (3.3 * self.zoom_px_per_mm).clamp(9.5, 16.0))
+                let font_size = if shape.font_size > 0.0 {
+                    (shape.font_size * 0.3528 * self.zoom_px_per_mm).clamp(6.0, 150.0)
+                } else {
+                    (3.3 * self.zoom_px_per_mm).clamp(9.5, 16.0)
+                };
+                (stroke_col, font_size)
             };
 
+            let w_px = (shape.width as f32) * self.zoom_px_per_mm;
+            let wrap_width = if eff_pos == TextPosition::Center {
+                (w_px - 8.0).max(12.0)
+            } else {
+                f32::INFINITY
+            };
+
+            let eff_align = shape.effective_text_align();
+            let halign = match eff_align {
+                TextAlign::Left => egui::Align::Min,
+                TextAlign::Center => egui::Align::Center,
+                TextAlign::Right => egui::Align::Max,
+                TextAlign::Auto => egui::Align::Center,
+            };
+
+            let mut job = egui::text::LayoutJob::simple(
+                caption,
+                FontId::proportional(font_px),
+                text_col,
+                wrap_width,
+            );
+            job.halign = halign;
+            let galley = painter.layout_job(job);
+            let g_size = galley.size();
+
+            let galley_pos = match eff_pos {
+                TextPosition::Center => {
+                    let y = sp.y - g_size.y * 0.5;
+                    let x = match eff_align {
+                        TextAlign::Left => sp.x - w_px * 0.5 + 4.0,
+                        TextAlign::Center | TextAlign::Auto => sp.x - g_size.x * 0.5,
+                        TextAlign::Right => sp.x + w_px * 0.5 - 4.0 - g_size.x,
+                    };
+                    Pos2::new(x, y)
+                }
+                TextPosition::Top => Pos2::new(sp.x - g_size.x * 0.5, sp.y - g_size.y),
+                TextPosition::Bottom => Pos2::new(sp.x - g_size.x * 0.5, sp.y),
+                TextPosition::Hidden | TextPosition::Auto => {
+                    Pos2::new(sp.x - g_size.x * 0.5, sp.y - g_size.y * 0.5)
+                }
+            };
+
+            painter.galley(galley_pos, galley, text_col);
+        } else if shape.stencil_id == "note_textbox"
+            && self.editing_shape_id != Some(shape.id)
+            && is_selected
+        {
+            // Subtle placeholder for empty selected textbox
+            let sp = self.page_to_screen(origin, Point::new(shape.x, shape.y));
             painter.text(
                 sp,
                 egui::Align2::CENTER_CENTER,
-                &caption,
-                FontId::proportional(font_px),
-                text_col,
+                "✏️ Kirjoita tekstiä...",
+                FontId::proportional((10.0 * 0.3528 * self.zoom_px_per_mm).clamp(9.0, 14.0)),
+                Color32::from_rgba_unmultiplied(148, 163, 184, 180),
             );
         }
 

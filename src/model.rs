@@ -245,6 +245,15 @@ pub enum TextPosition {
     Hidden, // Piilotettu (Hidden)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TextAlign {
+    #[default]
+    Auto,   // Automaattinen (Tekstilaatikot: Vasen; Vuokaaviot: Keskitetty)
+    Left,   // Vasen
+    Center, // Keskitetty
+    Right,  // Oikea
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiagramShape {
     pub id: u64,
@@ -272,6 +281,10 @@ pub struct DiagramShape {
     pub locked: bool,
     #[serde(default)]
     pub text_position: TextPosition,
+    #[serde(default)]
+    pub font_size: f32, // Font size in pt (0.0 = Auto)
+    #[serde(default)]
+    pub text_align: TextAlign,
 }
 
 impl DiagramShape {
@@ -340,8 +353,11 @@ impl DiagramShape {
                 if self.is_room_area || self.is_dimension {
                     TextPosition::Center
                 } else if self.stencil_id.starts_with("flow_")
+                    || self.stencil_id.starts_with("note_")
                     || self.stencil_id == "flow_process"
                     || self.stencil_id == "flow_decision"
+                    || self.stencil_id == "note_textbox"
+                    || self.stencil_id == "note_callout"
                     || self.name.to_lowercase().contains("prosessi")
                     || self.name.to_lowercase().contains("pääto")
                     || self.name.to_lowercase().contains("ehto")
@@ -351,6 +367,10 @@ impl DiagramShape {
                     || self.name.to_lowercase().contains("decision")
                     || self.name.to_lowercase().contains("suorakaide")
                     || self.name.to_lowercase().contains("salmiakki")
+                    || self.name.to_lowercase().contains("teksti")
+                    || self.name.to_lowercase().contains("huomautus")
+                    || self.name.to_lowercase().contains("callout")
+                    || self.name.to_lowercase().contains("note")
                 {
                     TextPosition::Center
                 } else if self.stencil_id.starts_with("elec_")
@@ -364,6 +384,23 @@ impl DiagramShape {
                 }
             }
             pos => pos,
+        }
+    }
+
+    /// Determines the resolved text alignment (Left, Center, or Right).
+    pub fn effective_text_align(&self) -> TextAlign {
+        match self.text_align {
+            TextAlign::Auto => {
+                if self.stencil_id.starts_with("note_")
+                    || self.stencil_id == "note_textbox"
+                    || self.name.to_lowercase().contains("tekstilaatikko")
+                {
+                    TextAlign::Left
+                } else {
+                    TextAlign::Center
+                }
+            }
+            align => align,
         }
     }
 
