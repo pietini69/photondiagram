@@ -2337,16 +2337,16 @@ impl PhotonVisionApp {
                 TextPosition::Center => {
                     let y = sp.y - g_size.y * 0.5;
                     let x = match eff_align {
-                        TextAlign::Left => sp.x - w_px * 0.5 + 4.0,
-                        TextAlign::Center | TextAlign::Auto => sp.x - g_size.x * 0.5,
-                        TextAlign::Right => sp.x + w_px * 0.5 - 4.0 - g_size.x,
+                        TextAlign::Left => sp.x - w_px * 0.5 + 4.0 - galley.rect.min.x,
+                        TextAlign::Center | TextAlign::Auto => sp.x - galley.rect.center().x,
+                        TextAlign::Right => sp.x + w_px * 0.5 - 4.0 - galley.rect.max.x,
                     };
                     Pos2::new(x, y)
                 }
-                TextPosition::Top => Pos2::new(sp.x - g_size.x * 0.5, sp.y - g_size.y),
-                TextPosition::Bottom => Pos2::new(sp.x - g_size.x * 0.5, sp.y),
+                TextPosition::Top => Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y),
+                TextPosition::Bottom => Pos2::new(sp.x - galley.rect.center().x, sp.y),
                 TextPosition::Hidden | TextPosition::Auto => {
-                    Pos2::new(sp.x - g_size.x * 0.5, sp.y - g_size.y * 0.5)
+                    Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y * 0.5)
                 }
             };
 
