@@ -283,4 +283,29 @@ mod tests {
         assert!(csv.contains("Olohuone"));
         assert!(csv.contains("m²"));
     }
+
+    #[test]
+    fn test_photoncam_lbrn2_export_and_import() {
+        use crate::formats::photoncam::{export_document_lbrn2, import_lbrn2_bytes};
+
+        let doc = template_floorplan_and_sfs_elec();
+        let lbrn2_xml = export_document_lbrn2(&doc);
+
+        // Verify XML header and CutSettings
+        assert!(lbrn2_xml.contains("<LightBurnProject"));
+        assert!(lbrn2_xml.contains("C00 (Cut / Leikkaus)"));
+        assert!(lbrn2_xml.contains("C01 (Scan / Kaiverrus)"));
+        assert!(lbrn2_xml.contains("C02 (Mark / Merkintä &amp; Johdot)"));
+
+        // Verify Shapes
+        assert!(lbrn2_xml.contains("<Shape Type=\"Rect\""));
+        assert!(lbrn2_xml.contains("<Shape Type=\"Text\""));
+
+        // Verify Round-trip Import
+        let imported = import_lbrn2_bytes(lbrn2_xml.as_bytes()).expect("import_lbrn2_bytes failed");
+        assert_eq!(imported.pages.len(), 1);
+        assert!(!imported.pages[0].shapes.is_empty(), "Imported page should have shapes");
+        assert!(imported.pages[0].width_mm >= 297.0);
+        assert!(imported.pages[0].height_mm >= 210.0);
+    }
 }

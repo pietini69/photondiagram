@@ -50,6 +50,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
                 <string>vdx</string>
                 <string>vsd</string>
                 <string>pvis</string>
+                <string>lbrn2</string>
+                <string>lbrn</string>
             </array>
         </dict>
     </array>

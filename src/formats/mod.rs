@@ -1,4 +1,5 @@
 pub mod export;
+pub mod photoncam;
 pub mod vsd;
 pub mod vsdx;
 pub mod zip_archive;
@@ -21,10 +22,15 @@ pub fn load_document_from_path(path: &Path) -> Result<DiagramDocument, String> {
     match ext.as_str() {
         "pvis" | "json" => serde_json::from_slice::<DiagramDocument>(&bytes)
             .map_err(|e| format!("PhotonVision JSON -virhe: {}", e)),
+        "lbrn2" | "lbrn" => photoncam::import_lbrn2_bytes(&bytes),
         "vsdx" => vsdx::read_vsdx_bytes(&bytes),
         "vdx" | "xml" => {
             let text = String::from_utf8_lossy(&bytes);
-            vsdx::read_vdx_str(&text)
+            if text.contains("<LightBurnProject") {
+                photoncam::import_lbrn2_bytes(&bytes)
+            } else {
+                vsdx::read_vdx_str(&text)
+            }
         }
         "vsd" => vsd::read_vsd_bytes(&bytes),
         _ => {
@@ -37,7 +43,11 @@ pub fn load_document_from_path(path: &Path) -> Result<DiagramDocument, String> {
                 Ok(doc)
             } else {
                 let text = String::from_utf8_lossy(&bytes);
-                vsdx::read_vdx_str(&text)
+                if text.contains("<LightBurnProject") {
+                    photoncam::import_lbrn2_bytes(&bytes)
+                } else {
+                    vsdx::read_vdx_str(&text)
+                }
             }
         }
     }
@@ -76,6 +86,10 @@ pub fn save_document_to_path(doc: &DiagramDocument, path: &Path) -> Result<(), S
         "csv" => {
             let csv = export::export_bom_csv(doc);
             fs::write(path, csv.as_bytes()).map_err(|e| format!("CSV-kirjoitusvirhe: {}", e))
+        }
+        "lbrn2" | "lbrn" => {
+            let xml = photoncam::export_document_lbrn2(doc);
+            fs::write(path, xml.as_bytes()).map_err(|e| format!("PhotonCAM LBRN2 -kirjoitusvirhe: {}", e))
         }
         _ => {
             let bytes = vsdx::write_vsdx_bytes(doc)?;

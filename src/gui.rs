@@ -244,9 +244,12 @@ impl PhotonVisionApp {
     fn open_file_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter(
-                "Visio & PhotonVision (.vsdx, .vdx, .vsd, .pvis)",
-                &["vsdx", "vdx", "vsd", "pvis", "json"],
+                "Tuetut kaaviot & projektit (.vsdx, .vdx, .vsd, .lbrn2, .pvis)",
+                &["vsdx", "vdx", "vsd", "lbrn2", "lbrn", "pvis", "json"],
             )
+            .add_filter("PhotonCAM / LightBurn (.lbrn2)", &["lbrn2", "lbrn"])
+            .add_filter("Microsoft Visio (.vsdx, .vdx, .vsd)", &["vsdx", "vdx", "vsd"])
+            .add_filter("PhotonVision (.pvis)", &["pvis"])
             .pick_file()
         {
             match load_document_from_path(&path) {
@@ -377,7 +380,7 @@ impl PhotonVisionApp {
                     }
                     ui.separator();
                     if ui
-                        .button("📂 Avaa (.vsdx, .vdx, .vsd, .pvis)...")
+                        .button("📂 Avaa (.vsdx, .vdx, .vsd, .lbrn2, .pvis)...")
                         .clicked()
                     {
                         ui.close_menu();
@@ -407,6 +410,10 @@ impl PhotonVisionApp {
                         self.save_file_as_dialog("vdx", "Visio XML Drawing (.vdx)");
                     }
                     ui.separator();
+                    if ui.button("🔥 Vie PhotonCAM / LightBurn (.lbrn2)...").clicked() {
+                        ui.close_menu();
+                        self.save_file_as_dialog("lbrn2", "PhotonCAM / LightBurn Laser Project (.lbrn2)");
+                    }
                     if ui.button("🖼️ Vie SVG-vektorikuva (.svg)...").clicked() {
                         ui.close_menu();
                         self.save_file_as_dialog("svg", "SVG Vector Graphics (.svg)");
