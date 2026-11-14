@@ -150,7 +150,7 @@ impl PhotonVisionApp {
             .families
             .entry(egui::FontFamily::Proportional)
             .or_default()
-            .push("Hack-Regular".to_owned());
+            .push("Hack".to_owned());
         cc.egui_ctx.set_fonts(fonts);
 
         Self::default()
