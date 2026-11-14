@@ -7,6 +7,7 @@ use crate::model::{
 use crate::routing::{connector_hit_test, find_wire_jumps, update_all_connectors};
 use crate::stencils::{built_in_stencils, instantiate_shape, StencilCategory, StencilItem};
 use crate::templates::{template_electrical_schematic, template_floorplan_and_sfs_elec};
+use crate::triangulate::draw_robust_path;
 use eframe::egui::{
     self, Color32, CornerRadius, FontId, Key, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2,
 };
@@ -1587,16 +1588,12 @@ impl PhotonVisionApp {
                         .iter()
                         .map(|(lx, ly)| self.page_to_screen(origin, shape.local_to_page(*lx, *ly)))
                         .collect();
-                    if *closed {
-                        let fill = if *filled {
-                            fill_col
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        painter.add(Shape::convex_polygon(pts, fill, stroke));
+                    let fill = if *filled {
+                        fill_col
                     } else {
-                        painter.add(Shape::line(pts, stroke));
-                    }
+                        Color32::TRANSPARENT
+                    };
+                    draw_robust_path(painter, &pts, *closed, fill, stroke);
                 }
                 PrimOp::Path {
                     points,
@@ -1622,16 +1619,12 @@ impl PhotonVisionApp {
                     } else {
                         Stroke::NONE
                     };
-                    if pts.len() >= 3 && *closed {
-                        let f = if *filled && f_col.a() > 0 {
-                            f_col
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        painter.add(Shape::convex_polygon(pts, f, st));
-                    } else if pts.len() >= 2 {
-                        painter.add(Shape::line(pts, Stroke::new(cur_sw, s_col)));
-                    }
+                    let f = if *filled && f_col.a() > 0 {
+                        f_col
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    draw_robust_path(painter, &pts, *closed, f, st);
                 }
                 PrimOp::Ellipse {
                     cx,
@@ -1656,18 +1649,19 @@ impl PhotonVisionApp {
                     } else {
                         Stroke::NONE
                     };
-                    let steps = 18;
-                    let pts: Vec<Pos2> = (0..=steps)
+                    let steps = 24;
+                    let pts: Vec<Pos2> = (0..steps)
                         .map(|i| {
                             let t = (i as f32 / steps as f32) * std::f32::consts::TAU;
                             Pos2::new(center.x + erx * t.cos(), center.y + ery * t.sin())
                         })
                         .collect();
-                    if *filled && f_col.a() > 0 {
-                        painter.add(Shape::convex_polygon(pts, f_col, st));
+                    let f = if *filled && f_col.a() > 0 {
+                        f_col
                     } else {
-                        painter.add(Shape::line(pts, st));
-                    }
+                        Color32::TRANSPARENT
+                    };
+                    draw_robust_path(painter, &pts, true, f, st);
                 }
                 PrimOp::Text {
                     x,
@@ -1991,9 +1985,19 @@ fn draw_stencil_mini_preview(painter: &egui::Painter, rect: Rect, item: &Stencil
                 painter.circle_filled(map(*cx, *cy), rad, f);
                 painter.circle_stroke(map(*cx, *cy), rad, stroke);
             }
-            PrimOp::Polyline { points, .. } => {
+            PrimOp::Polyline { points, closed, filled } => {
                 let pts: Vec<Pos2> = points.iter().map(|(x, y)| map(*x, *y)).collect();
-                painter.add(Shape::line(pts, stroke));
+                let f = if *filled {
+                    Color32::from_rgba_unmultiplied(
+                        item.fill_color[0],
+                        item.fill_color[1],
+                        item.fill_color[2],
+                        item.fill_color[3],
+                    )
+                } else {
+                    Color32::TRANSPARENT
+                };
+                draw_robust_path(painter, &pts, *closed, f, stroke);
             }
             PrimOp::Path {
                 points,
@@ -2022,16 +2026,12 @@ fn draw_stencil_mini_preview(painter: &egui::Painter, rect: Rect, item: &Stencil
                 } else {
                     Stroke::NONE
                 };
-                if pts.len() >= 3 && *closed {
-                    let f = if *filled && f_col.a() > 0 {
-                        f_col
-                    } else {
-                        Color32::TRANSPARENT
-                    };
-                    painter.add(Shape::convex_polygon(pts, f, st));
-                } else if pts.len() >= 2 {
-                    painter.add(Shape::line(pts, Stroke::new(1.0_f32, s_col)));
-                }
+                let f = if *filled && f_col.a() > 0 {
+                    f_col
+                } else {
+                    Color32::TRANSPARENT
+                };
+                draw_robust_path(painter, &pts, *closed, f, st);
             }
             PrimOp::Ellipse {
                 cx,
@@ -2064,17 +2064,18 @@ fn draw_stencil_mini_preview(painter: &egui::Painter, rect: Rect, item: &Stencil
                     Stroke::NONE
                 };
                 let steps = 16;
-                let pts: Vec<Pos2> = (0..=steps)
+                let pts: Vec<Pos2> = (0..steps)
                     .map(|i| {
                         let t = (i as f32 / steps as f32) * std::f32::consts::TAU;
                         Pos2::new(center.x + erx * t.cos(), center.y + ery * t.sin())
                     })
                     .collect();
-                if *filled && f_col.a() > 0 {
-                    painter.add(Shape::convex_polygon(pts, f_col, st));
+                let f = if *filled && f_col.a() > 0 {
+                    f_col
                 } else {
-                    painter.add(Shape::line(pts, st));
-                }
+                    Color32::TRANSPARENT
+                };
+                draw_robust_path(painter, &pts, true, f, st);
             }
             PrimOp::Text {
                 x,

@@ -4,6 +4,7 @@ pub mod model;
 pub mod routing;
 pub mod stencils;
 pub mod templates;
+pub mod triangulate;
 
 #[cfg(test)]
 mod tests {
@@ -213,6 +214,36 @@ mod tests {
             assert!(logos_imported.iter().all(|s| s.name != "Shape"));
             let android = logos_imported.iter().find(|s| s.name == "android-1").unwrap();
             assert!(!android.geometry.is_empty());
+        }
+
+        // Test general.vssx and specifically Free Services
+        let gen_vssx = std::path::Path::new("/Users/nikopietinen/Downloads/visiostencilfactory-master/stencils/azure-icons/general.vssx");
+        if gen_vssx.exists() {
+            let file_bytes = std::fs::read(gen_vssx).unwrap();
+            let gen_imported = import_vssx_stencils(&file_bytes, "general").unwrap();
+            let free_svc = gen_imported.iter().find(|s| s.name.to_lowercase().contains("free services")).expect("Missing Free Services");
+            
+            // Verify all paths are well-formed and can be triangulated without miter explosion
+            let mut path_count = 0;
+            for op in &free_svc.geometry {
+                if let crate::model::PrimOp::Path { points, closed, .. } = op {
+                    path_count += 1;
+                    if *closed && points.len() >= 3 {
+                        let pos_pts: Vec<eframe::egui::Pos2> = points
+                            .iter()
+                            .map(|(x, y)| eframe::egui::Pos2::new(*x as f32, *y as f32))
+                            .collect();
+                        let tris = crate::triangulate::triangulate_polygon(&pos_pts);
+                        assert!(!tris.is_empty(), "Failed to triangulate Free Services path");
+                        for tri in tris {
+                            for idx in tri {
+                                assert!((idx as usize) < pos_pts.len());
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(path_count > 0, "Free Services should have vector paths");
         }
     }
 

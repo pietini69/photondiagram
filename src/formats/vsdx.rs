@@ -171,6 +171,16 @@ fn get_row_cell_f64(row: Node, name: &str, default: f64) -> f64 {
     default
 }
 
+#[inline]
+fn push_point_dedup(path: &mut Vec<(f64, f64)>, p: (f64, f64)) {
+    if let Some(last) = path.last() {
+        if (p.0 - last.0).abs() < 0.0002 && (p.1 - last.1).abs() < 0.0002 {
+            return;
+        }
+    }
+    path.push(p);
+}
+
 /// Generates 1 to 3 uppercase monogram initials from a shape/master name.
 fn generate_initials(name: &str) -> String {
     let clean = name.trim();
@@ -383,6 +393,14 @@ fn collect_shape_geometry(
                 match row_type {
                     "RelMoveTo" => {
                         if cur_path.len() >= 2 {
+                            if cur_path.len() >= 3 {
+                                let p0 = cur_path[0];
+                                if let Some(plast) = cur_path.last().copied() {
+                                    if (plast.0 - p0.0).abs() < 0.0002 && (plast.1 - p0.1).abs() < 0.0002 {
+                                        cur_path.pop();
+                                    }
+                                }
+                            }
                             ops.push(PrimOp::Path {
                                 points: std::mem::take(&mut cur_path),
                                 closed: true,
@@ -396,10 +414,18 @@ fn collect_shape_geometry(
                         }
                         let rx = get_row_cell_f64(row, "X", 0.0);
                         let ry = get_row_cell_f64(row, "Y", 0.0);
-                        cur_path.push(to_norm_rel(rx, ry));
+                        push_point_dedup(&mut cur_path, to_norm_rel(rx, ry));
                     }
                     "MoveTo" => {
                         if cur_path.len() >= 2 {
+                            if cur_path.len() >= 3 {
+                                let p0 = cur_path[0];
+                                if let Some(plast) = cur_path.last().copied() {
+                                    if (plast.0 - p0.0).abs() < 0.0002 && (plast.1 - p0.1).abs() < 0.0002 {
+                                        cur_path.pop();
+                                    }
+                                }
+                            }
                             ops.push(PrimOp::Path {
                                 points: std::mem::take(&mut cur_path),
                                 closed: true,
@@ -413,17 +439,41 @@ fn collect_shape_geometry(
                         }
                         let ax = get_row_cell_f64(row, "X", 0.0);
                         let ay = get_row_cell_f64(row, "Y", 0.0);
-                        cur_path.push(to_norm_abs(ax, ay));
+                        push_point_dedup(&mut cur_path, to_norm_abs(ax, ay));
                     }
-                    "RelLineTo" | "RelEllipticalArcTo" => {
+                    "RelLineTo" => {
                         let rx = get_row_cell_f64(row, "X", 0.0);
                         let ry = get_row_cell_f64(row, "Y", 0.0);
-                        cur_path.push(to_norm_rel(rx, ry));
+                        push_point_dedup(&mut cur_path, to_norm_rel(rx, ry));
                     }
-                    "LineTo" | "EllipticalArcTo" => {
+                    "LineTo" => {
                         let ax = get_row_cell_f64(row, "X", 0.0);
                         let ay = get_row_cell_f64(row, "Y", 0.0);
-                        cur_path.push(to_norm_abs(ax, ay));
+                        push_point_dedup(&mut cur_path, to_norm_abs(ax, ay));
+                    }
+                    "RelEllipticalArcTo" => {
+                        let p0 = cur_path.last().copied().unwrap_or((0.0, 0.0));
+                        let ctrl = to_norm_rel(get_row_cell_f64(row, "A", 0.0), get_row_cell_f64(row, "B", 0.0));
+                        let p1 = to_norm_rel(get_row_cell_f64(row, "X", 0.0), get_row_cell_f64(row, "Y", 0.0));
+                        for step in 1..=3 {
+                            let t = step as f64 / 3.0;
+                            let it = 1.0 - t;
+                            let x = it.powi(2) * p0.0 + 2.0 * it * t * ctrl.0 + t.powi(2) * p1.0;
+                            let y = it.powi(2) * p0.1 + 2.0 * it * t * ctrl.1 + t.powi(2) * p1.1;
+                            push_point_dedup(&mut cur_path, (x, y));
+                        }
+                    }
+                    "EllipticalArcTo" => {
+                        let p0 = cur_path.last().copied().unwrap_or((0.0, 0.0));
+                        let ctrl = to_norm_abs(get_row_cell_f64(row, "A", 0.0), get_row_cell_f64(row, "B", 0.0));
+                        let p1 = to_norm_abs(get_row_cell_f64(row, "X", 0.0), get_row_cell_f64(row, "Y", 0.0));
+                        for step in 1..=3 {
+                            let t = step as f64 / 3.0;
+                            let it = 1.0 - t;
+                            let x = it.powi(2) * p0.0 + 2.0 * it * t * ctrl.0 + t.powi(2) * p1.0;
+                            let y = it.powi(2) * p0.1 + 2.0 * it * t * ctrl.1 + t.powi(2) * p1.1;
+                            push_point_dedup(&mut cur_path, (x, y));
+                        }
                     }
                     "RelCubBezTo" => {
                         let p0 = cur_path.last().copied().unwrap_or((0.0, 0.0));
@@ -435,7 +485,7 @@ fn collect_shape_geometry(
                             let it = 1.0 - t;
                             let x = it.powi(3) * p0.0 + 3.0 * it.powi(2) * t * c1.0 + 3.0 * it * t.powi(2) * c2.0 + t.powi(3) * p1.0;
                             let y = it.powi(3) * p0.1 + 3.0 * it.powi(2) * t * c1.1 + 3.0 * it * t.powi(2) * c2.1 + t.powi(3) * p1.1;
-                            cur_path.push((x, y));
+                            push_point_dedup(&mut cur_path, (x, y));
                         }
                     }
                     "RelQuadBezTo" => {
@@ -447,7 +497,7 @@ fn collect_shape_geometry(
                             let it = 1.0 - t;
                             let x = it.powi(2) * p0.0 + 2.0 * it * t * c.0 + t.powi(2) * p1.0;
                             let y = it.powi(2) * p0.1 + 2.0 * it * t * c.1 + t.powi(2) * p1.1;
-                            cur_path.push((x, y));
+                            push_point_dedup(&mut cur_path, (x, y));
                         }
                     }
                     "Ellipse" => {
@@ -482,6 +532,14 @@ fn collect_shape_geometry(
             }
 
             if cur_path.len() >= 2 {
+                if cur_path.len() >= 3 {
+                    let p0 = cur_path[0];
+                    if let Some(plast) = cur_path.last().copied() {
+                        if (plast.0 - p0.0).abs() < 0.0002 && (plast.1 - p0.1).abs() < 0.0002 {
+                            cur_path.pop();
+                        }
+                    }
+                }
                 ops.push(PrimOp::Path {
                     points: cur_path,
                     closed: true,
