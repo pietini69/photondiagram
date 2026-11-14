@@ -1,7 +1,7 @@
 use crate::formats::zip_archive::ZipArchive;
 use crate::model::{
     ArrowType, ConnectionPort, ConnectorStyle, DiagramConnector, DiagramDocument, DiagramPage,
-    DiagramShape, DrawingScale, Point, PortDir, PrimOp,
+    DiagramShape, DrawingScale, Point, PortDir, PrimOp, TextPosition,
 };
 use crate::routing::update_all_connectors;
 use crate::stencils::{built_in_stencils, StencilCategory, StencilItem};
@@ -269,6 +269,40 @@ fn generate_placeholder_geometry(
             y2: 0.80,
         },
     ]
+}
+
+/// Checks if geometry consists only of a single unfilled outer bounding box (frame)
+fn is_trivial_bounding_box(ops: &[PrimOp]) -> bool {
+    if ops.is_empty() {
+        return true;
+    }
+    if ops.len() == 1 {
+        match &ops[0] {
+            PrimOp::Rect { x, y, w, h, filled } => {
+                !*filled && *x <= 0.05 && *y <= 0.05 && *w >= 0.9 && *h >= 0.9
+            }
+            PrimOp::Path {
+                points,
+                closed,
+                filled,
+                ..
+            } => {
+                !*filled
+                    && *closed
+                    && points.len() <= 5
+                    && {
+                        let min_x = points.iter().map(|p| p.0).fold(1.0, f64::min);
+                        let max_x = points.iter().map(|p| p.0).fold(0.0, f64::max);
+                        let min_y = points.iter().map(|p| p.1).fold(1.0, f64::min);
+                        let max_y = points.iter().map(|p| p.1).fold(0.0, f64::max);
+                        min_x <= 0.05 && min_y <= 0.05 && max_x >= 0.95 && max_y >= 0.95
+                    }
+            }
+            _ => false,
+        }
+    } else {
+        false
+    }
 }
 
 /// Recursively collects all geometry primitives from a shape and its sub-shapes,
@@ -751,7 +785,7 @@ pub fn import_vssx_stencils(bytes: &[u8], library_name: &str) -> Result<Vec<Sten
             &mut dominant_stroke,
         );
 
-        if geometry.is_empty() {
+        if geometry.is_empty() || is_trivial_bounding_box(&geometry) {
             geometry = generate_placeholder_geometry(&resolved_name, dominant_fill, dominant_stroke);
         }
 
@@ -1117,6 +1151,7 @@ fn parse_visio_shape(
         is_dimension: false,
         is_room_area: false,
         locked: false,
+        text_position: TextPosition::Auto,
     });
 }
 

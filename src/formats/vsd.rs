@@ -107,6 +107,7 @@ pub fn read_vsd_bytes(bytes: &[u8]) -> Result<DiagramDocument, String> {
                 is_dimension: false,
                 is_room_area: false,
                 locked: false,
+                text_position: crate::model::TextPosition::Auto,
             });
         }
     }

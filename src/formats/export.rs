@@ -310,15 +310,19 @@ fn render_shape_svg(page: &DiagramPage, shape: &DiagramShape, svg: &mut String) 
     // Label / Dimension / Room area caption
     let caption = shape_display_caption(page, shape);
     if !caption.is_empty() {
-        let label_y = if shape.is_room_area || shape.is_dimension {
-            shape.y
+        let label_pt = shape.label_position();
+        let eff_pos = shape.effective_text_position();
+        let font_size = if eff_pos == crate::model::TextPosition::Center {
+            let line_count = caption.lines().count().max(1) as f64;
+            (shape.height / (line_count + 1.2)).clamp(2.5, 4.5)
         } else {
-            shape.y - shape.height * 0.5 - 2.0
+            3.0
         };
         svg.push_str(&format!(
-            "  <text x=\"{:.2}\" y=\"{:.2}\" font-family=\"sans-serif\" font-size=\"3.0\" font-weight=\"bold\" fill=\"{}\" text-anchor=\"middle\">{}</text>\n",
-            shape.x,
-            label_y,
+            "  <text x=\"{:.2}\" y=\"{:.2}\" font-family=\"sans-serif\" font-size=\"{:.2}\" font-weight=\"bold\" fill=\"{}\" text-anchor=\"middle\" dominant-baseline=\"central\">{}</text>\n",
+            label_pt.x,
+            label_pt.y,
+            font_size,
             stroke,
             escape_xml(&caption)
         ));
@@ -399,11 +403,12 @@ pub fn export_page_dxf(page: &DiagramPage) -> String {
 
         let caption = shape_display_caption(page, shape);
         if !caption.is_empty() {
+            let label_pt = shape.label_position();
             dxf.push_str(&format!(
                 "0\nTEXT\n8\n{}\n10\n{:.3}\n20\n{:.3}\n30\n0.0\n40\n2.5\n1\n{}\n",
                 layer,
-                shape.x,
-                h_page - shape.y,
+                label_pt.x,
+                h_page - label_pt.y,
                 caption
             ));
         }
@@ -465,6 +470,9 @@ pub fn export_bom_csv(doc: &DiagramDocument) -> String {
 }
 
 pub fn shape_display_caption(page: &DiagramPage, shape: &DiagramShape) -> String {
+    if shape.effective_text_position() == crate::model::TextPosition::Hidden {
+        return String::new();
+    }
     if shape.is_dimension {
         let len_str = page.scale.format_length(shape.width.max(shape.height));
         if shape.label.is_empty() {
@@ -483,12 +491,6 @@ pub fn shape_display_caption(page: &DiagramPage, shape: &DiagramShape) -> String
         shape.label.clone()
     } else if !shape.value.is_empty() {
         shape.value.clone()
-    } else if !shape.name.is_empty()
-        && !shape.name.starts_with("Ulkoseinä")
-        && !shape.name.starts_with("Väliseinä")
-        && !shape.name.starts_with("Seinä")
-    {
-        shape.name.clone()
     } else {
         String::new()
     }

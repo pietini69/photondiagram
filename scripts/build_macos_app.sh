@@ -59,4 +59,11 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "✅ Paketoitu valmiiksi: $APP_BUNDLE"
+if security find-identity -v -p codesigning | grep -q "Apple Development"; then
+    echo "🔏 Allekirjoitetaan Developer-sertifikaatilla..."
+    codesign --deep --force --options runtime --sign "Apple Development: Niko Pietinen (DTG24Y4L3C)" "$APP_BUNDLE" || true
+else
+    codesign --deep --force --sign - "$APP_BUNDLE" || true
+fi
+
+echo "✅ Paketoitu ja allekirjoitettu valmiiksi: $APP_BUNDLE"

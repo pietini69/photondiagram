@@ -2,7 +2,7 @@ use crate::formats::export::shape_display_caption;
 use crate::formats::{load_document_from_path, load_stencil_library, save_document_to_path};
 use crate::model::{
     ArrowType, ConnectorStyle, DiagramConnector, DiagramDocument, DiagramPage, DiagramShape,
-    DrawingScale, Point, PrimOp,
+    DrawingScale, Point, PrimOp, TextPosition,
 };
 use crate::routing::{connector_hit_test, find_wire_jumps, update_all_connectors};
 use crate::stencils::{built_in_stencils, instantiate_shape, StencilCategory, StencilItem};
@@ -51,6 +51,7 @@ pub struct PhotonVisionApp {
     pub pending_stencil_id: Option<String>,
     pub selected_shape_id: Option<u64>,
     pub selected_connector_id: Option<u64>,
+    pub editing_shape_id: Option<u64>,
     pub current_file: Option<PathBuf>,
     pub status_msg: String,
 
@@ -116,6 +117,7 @@ impl Default for PhotonVisionApp {
             pending_stencil_id: None,
             selected_shape_id: None,
             selected_connector_id: None,
+            editing_shape_id: None,
             current_file: None,
             status_msg: "Valmis — Valitse vasemmalta symboli tai vedä vihreästä liitospisteestä johdin. Sivu 1: Sähkökaavio, Sivu 2: Pohjapiirustus 1:50.".to_string(),
             file_action_tx,
@@ -812,12 +814,37 @@ impl PhotonVisionApp {
                             .num_columns(2)
                             .spacing([8.0, 6.0])
                             .show(ui, |ui| {
-                                ui.label("Tunnus (Label):");
-                                ui.text_edit_singleline(&mut shape.label);
+                                ui.label("Teksti / Tunnus:");
+                                let te = egui::TextEdit::multiline(&mut shape.label)
+                                    .desired_rows(2)
+                                    .desired_width(f32::INFINITY)
+                                    .hint_text("Kirjoita teksti...");
+                                let te_res = ui.add(te);
+                                if self.editing_shape_id == Some(shape.id) {
+                                    te_res.request_focus();
+                                }
                                 ui.end_row();
 
                                 ui.label("Arvo / Tieto:");
                                 ui.text_edit_singleline(&mut shape.value);
+                                ui.end_row();
+
+                                ui.label("Tekstin sijainti:");
+                                egui::ComboBox::from_id_salt("shape_text_pos_combo")
+                                    .selected_text(match shape.text_position {
+                                        TextPosition::Auto => "Automaattinen",
+                                        TextPosition::Center => "Keskellä sisällä",
+                                        TextPosition::Top => "Yläpuolella",
+                                        TextPosition::Bottom => "Alapuolella",
+                                        TextPosition::Hidden => "Piilotettu",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut shape.text_position, TextPosition::Auto, "Automaattinen");
+                                        ui.selectable_value(&mut shape.text_position, TextPosition::Center, "Keskellä sisällä");
+                                        ui.selectable_value(&mut shape.text_position, TextPosition::Top, "Yläpuolella");
+                                        ui.selectable_value(&mut shape.text_position, TextPosition::Bottom, "Alapuolella");
+                                        ui.selectable_value(&mut shape.text_position, TextPosition::Hidden, "Piilotettu");
+                                    });
                                 ui.end_row();
 
                                 ui.label("Sijainti X (mm):");
@@ -1272,6 +1299,72 @@ impl PhotonVisionApp {
 
                 // Handle Canvas Mouse Interactions
                 self.handle_canvas_interactions(&response, origin, hovered_port, mouse_mm);
+
+                // Draw inline text editor overlay on double-clicked shape
+                if let Some(edit_id) = self.editing_shape_id {
+                    let shape_geom = self
+                        .doc
+                        .current_page()
+                        .shapes
+                        .iter()
+                        .find(|s| s.id == edit_id)
+                        .map(|s| (s.x, s.y, s.width, s.height));
+
+                    if let Some((sx, sy, sw, sh)) = shape_geom {
+                        let center_sp = self.page_to_screen(origin, Point::new(sx, sy));
+                        let w_px = ((sw as f32) * self.zoom_px_per_mm).clamp(140.0, 360.0);
+                        let h_px = ((sh as f32) * self.zoom_px_per_mm).clamp(50.0, 180.0);
+                        let edit_rect = Rect::from_center_size(center_sp, Vec2::new(w_px, h_px));
+
+                        let mut close_editor = false;
+                        let page = self.doc.current_page_mut();
+                        if let Some(shape) = page.shapes.iter_mut().find(|s| s.id == edit_id) {
+                            egui::Area::new(egui::Id::new("shape_inline_text_edit"))
+                                .fixed_pos(edit_rect.min)
+                                .order(egui::Order::Foreground)
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style())
+                                        .fill(Color32::from_rgb(255, 255, 255))
+                                        .stroke(Stroke::new(1.8_f32, Color32::from_rgb(37, 99, 235)))
+                                        .corner_radius(CornerRadius::same(5))
+                                        .inner_margin(6.0)
+                                        .show(ui, |ui| {
+                                            ui.set_width(w_px - 12.0);
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new("✏️ Muokkaa tekstiä:")
+                                                        .small()
+                                                        .color(Color32::from_rgb(100, 116, 139)),
+                                                );
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        if ui.small_button("Valmis (✓)").clicked() {
+                                                            close_editor = true;
+                                                        }
+                                                    },
+                                                );
+                                            });
+                                            let te = egui::TextEdit::multiline(&mut shape.label)
+                                                .desired_width(w_px - 12.0)
+                                                .desired_rows(2)
+                                                .hint_text("Kirjoita teksti...");
+                                            let te_res = ui.add(te);
+                                            te_res.request_focus();
+
+                                            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                                                close_editor = true;
+                                            }
+                                        });
+                                });
+                        }
+                        if close_editor {
+                            self.editing_shape_id = None;
+                        }
+                    } else {
+                        self.editing_shape_id = None;
+                    }
+                }
             });
     }
 
@@ -1549,8 +1642,32 @@ impl PhotonVisionApp {
             }
         }
 
+        // Double-click to directly edit text inside a shape
+        if response.double_clicked() && self.pending_stencil_id.is_none() {
+            let page = self.doc.current_page();
+            let hit = page
+                .shapes
+                .iter()
+                .rev()
+                .find(|s| !s.is_room_area && s.contains_point(cur_mm, 1.5))
+                .or_else(|| {
+                    page.shapes
+                        .iter()
+                        .rev()
+                        .find(|s| s.is_room_area && s.contains_point(cur_mm, 1.5))
+                });
+
+            if let Some(s) = hit {
+                self.selected_shape_id = Some(s.id);
+                self.selected_connector_id = None;
+                self.editing_shape_id = Some(s.id);
+                return;
+            }
+        }
+
         // 6. Simple click selection
         if response.clicked() && self.pending_stencil_id.is_none() {
+            self.editing_shape_id = None;
             let page = self.doc.current_page();
             // Hit-test connectors first
             if let Some(conn) = page
@@ -1777,19 +1894,39 @@ impl PhotonVisionApp {
         // Draw component label / value or live architectural room area / dimension
         let caption = shape_display_caption(page, shape);
         if !caption.is_empty() {
-            let label_pt = if shape.is_room_area || shape.is_dimension {
-                Point::new(shape.x, shape.y)
-            } else {
-                let bb = shape.bounding_box();
-                Point::new(shape.x, bb.min_y - 2.6)
-            };
+            let eff_pos = shape.effective_text_position();
+            let label_pt = shape.label_position();
             let sp = self.page_to_screen(origin, label_pt);
+
+            let (text_col, font_px) = if eff_pos == TextPosition::Center {
+                let fill_lum = (shape.fill_color[0] as f32 * 0.299
+                    + shape.fill_color[1] as f32 * 0.587
+                    + shape.fill_color[2] as f32 * 0.114)
+                    / 255.0;
+                let has_fill = shape.fill_color[3] > 40;
+                let col = if has_fill && fill_lum < 0.45 {
+                    Color32::WHITE
+                } else if has_fill && fill_lum > 0.82 {
+                    // Dark navy on light pastel fills
+                    Color32::from_rgb(15, 23, 42)
+                } else {
+                    stroke_col
+                };
+
+                let line_count = caption.lines().count().max(1) as f32;
+                let h_px = (shape.height as f32) * self.zoom_px_per_mm;
+                let font_size = (h_px / (line_count + 0.9)).clamp(9.0, 18.0);
+                (col, font_size)
+            } else {
+                (stroke_col, (3.3 * self.zoom_px_per_mm).clamp(9.5, 16.0))
+            };
+
             painter.text(
                 sp,
                 egui::Align2::CENTER_CENTER,
                 &caption,
-                FontId::proportional((3.3 * self.zoom_px_per_mm).clamp(9.5, 16.0)),
-                stroke_col,
+                FontId::proportional(font_px),
+                text_col,
             );
         }
 

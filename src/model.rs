@@ -235,6 +235,16 @@ pub enum PrimOp {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TextPosition {
+    #[default]
+    Auto,   // Automaattinen: vuokaavio/tilat -> Keskellä; sähkömerkit -> Yläpuolella; ikonit -> Alapuolella
+    Center, // Keskellä sisällä (Center)
+    Top,    // Yläpuolella (Top)
+    Bottom, // Alapuolella (Bottom)
+    Hidden, // Piilotettu (Hidden)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiagramShape {
     pub id: u64,
@@ -260,6 +270,8 @@ pub struct DiagramShape {
     pub is_dimension: bool,
     pub is_room_area: bool,
     pub locked: bool,
+    #[serde(default)]
+    pub text_position: TextPosition,
 }
 
 impl DiagramShape {
@@ -319,6 +331,52 @@ impl DiagramShape {
 
     pub fn contains_point(&self, p: Point, tolerance_mm: f64) -> bool {
         self.bounding_box().expand(tolerance_mm).contains(p)
+    }
+
+    /// Determines the resolved text position (Center, Top, Bottom, or Hidden).
+    pub fn effective_text_position(&self) -> TextPosition {
+        match self.text_position {
+            TextPosition::Auto => {
+                if self.is_room_area || self.is_dimension {
+                    TextPosition::Center
+                } else if self.stencil_id.starts_with("flow_")
+                    || self.stencil_id == "flow_process"
+                    || self.stencil_id == "flow_decision"
+                    || self.name.to_lowercase().contains("prosessi")
+                    || self.name.to_lowercase().contains("pääto")
+                    || self.name.to_lowercase().contains("ehto")
+                    || self.name.to_lowercase().contains("terminaattori")
+                    || self.name.to_lowercase().contains("flowchart")
+                    || self.name.to_lowercase().contains("process")
+                    || self.name.to_lowercase().contains("decision")
+                    || self.name.to_lowercase().contains("suorakaide")
+                    || self.name.to_lowercase().contains("salmiakki")
+                {
+                    TextPosition::Center
+                } else if self.stencil_id.starts_with("elec_")
+                    || self.stencil_id.starts_with("inst_")
+                    || self.stencil_id.starts_with("iec_")
+                    || self.stencil_id.starts_with("sfs_")
+                {
+                    TextPosition::Top
+                } else {
+                    TextPosition::Bottom
+                }
+            }
+            pos => pos,
+        }
+    }
+
+    /// Calculates world coordinates for displaying the shape label / text.
+    pub fn label_position(&self) -> Point {
+        let bb = self.bounding_box();
+        match self.effective_text_position() {
+            TextPosition::Center => Point::new(self.x, self.y),
+            TextPosition::Top => Point::new(self.x, bb.min_y - 2.6),
+            TextPosition::Bottom => Point::new(self.x, bb.max_y + 2.6),
+            TextPosition::Hidden => Point::new(self.x, self.y),
+            TextPosition::Auto => Point::new(self.x, self.y),
+        }
     }
 }
 

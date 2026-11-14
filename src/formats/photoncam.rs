@@ -368,11 +368,7 @@ fn export_shape_lbrn2(page: &DiagramPage, shape: &DiagramShape, out: &mut String
     // Export shape label or dimension/room area caption if present
     let caption = shape_display_caption(page, shape);
     if !caption.is_empty() {
-        let label_y = if shape.is_room_area || shape.is_dimension {
-            shape.y
-        } else {
-            shape.y - shape.height * 0.5 - 2.5
-        };
+        let label_pt = shape.label_position();
         let h_mm = 3.20_f64;
 
         out.push_str(&format!(
@@ -381,7 +377,7 @@ fn export_shape_lbrn2(page: &DiagramPage, shape: &DiagramShape, out: &mut String
         ));
         out.push_str(&format!(
             "        <XForm>1 0 0 1 {:.3} {:.3}</XForm>\n",
-            shape.x, label_y
+            label_pt.x, label_pt.y
         ));
         out.push_str("    </Shape>\n");
     }
@@ -605,6 +601,7 @@ fn parse_lbrn2_shapes(
                         is_dimension: false,
                         is_room_area: false,
                         locked: false,
+                        text_position: crate::model::TextPosition::Auto,
                     };
                     *next_id += 1;
                     out.push(s);
@@ -653,6 +650,7 @@ fn parse_lbrn2_shapes(
                     is_dimension: false,
                     is_room_area: false,
                     locked: false,
+                    text_position: crate::model::TextPosition::Auto,
                 };
                 *next_id += 1;
                 out.push(s);
@@ -695,6 +693,7 @@ fn parse_lbrn2_shapes(
                         is_dimension: false,
                         is_room_area: false,
                         locked: false,
+                        text_position: crate::model::TextPosition::Auto,
                     };
                     *next_id += 1;
                     out.push(s);
@@ -757,6 +756,7 @@ fn parse_lbrn2_shapes(
                                 is_dimension: false,
                                 is_room_area: false,
                                 locked: false,
+                                text_position: crate::model::TextPosition::Auto,
                             };
                             *next_id += 1;
                             out.push(s);

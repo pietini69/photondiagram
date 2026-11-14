@@ -1,4 +1,4 @@
-use crate::model::{ConnectionPort, DiagramShape, PortDir, PrimOp};
+use crate::model::{ConnectionPort, DiagramShape, PortDir, PrimOp, TextPosition};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -65,7 +65,9 @@ pub struct StencilItem {
 
 impl StencilItem {
     pub fn instantiate(&self, shape_id: u64, x: f64, y: f64, instance_num: usize) -> DiagramShape {
-        let label = if self.default_label.ends_with('?') {
+        let label = if self.category.is_imported() {
+            String::new()
+        } else if self.default_label.ends_with('?') {
             format!("{}{}", self.default_label.trim_end_matches('?'), instance_num)
         } else {
             self.default_label.clone()
@@ -95,6 +97,7 @@ impl StencilItem {
             is_dimension: self.is_dimension,
             is_room_area: self.is_room_area,
             locked: false,
+            text_position: TextPosition::Auto,
         }
     }
 }
@@ -1161,6 +1164,35 @@ pub fn builtin_stencils() -> Vec<StencilItem> {
         // 5. VUOKAAVIOT, PLC-AUTOMAATIO & VERKKO
         // ====================================================================
         StencilItem {
+            id: "flow_start_end".into(),
+            name: "Aloitus / Lopetus (Terminaattori)".into(),
+            category: StencilCategory::FlowAndNet,
+            default_label: "Aloitus".into(),
+            default_value: "".into(),
+            default_width_mm: 36.0,
+            default_height_mm: 16.0,
+            default_layer: "Oletus".into(),
+            stroke_color: [22, 163, 74, 255],
+            fill_color: [220, 252, 231, 255],
+            stroke_width: 1.8,
+            ports: four_cardinal_ports(),
+            geometry: vec![PrimOp::Path {
+                points: vec![
+                    (0.2, 0.0), (0.8, 0.0),
+                    (0.92, 0.15), (1.0, 0.5), (0.92, 0.85),
+                    (0.8, 1.0), (0.2, 1.0),
+                    (0.08, 0.85), (0.0, 0.5), (0.08, 0.15),
+                ],
+                closed: true,
+                filled: true,
+                fill_color: None,
+                stroke_color: None,
+                stroke_width: None,
+            }],
+            is_dimension: false,
+            is_room_area: false,
+        },
+        StencilItem {
             id: "flow_process".into(),
             name: "Prosessi / Suorakaide".into(),
             category: StencilCategory::FlowAndNet,
@@ -1181,7 +1213,7 @@ pub fn builtin_stencils() -> Vec<StencilItem> {
             id: "flow_decision".into(),
             name: "Päätös / Ehto (Salmiakki)".into(),
             category: StencilCategory::FlowAndNet,
-            default_label: "Ehto?".into(),
+            default_label: "Ehto".into(),
             default_value: "".into(),
             default_width_mm: 36.0,
             default_height_mm: 24.0,
@@ -1195,6 +1227,106 @@ pub fn builtin_stencils() -> Vec<StencilItem> {
                 closed: true,
                 filled: true,
             }],
+            is_dimension: false,
+            is_room_area: false,
+        },
+        StencilItem {
+            id: "flow_io".into(),
+            name: "Syöte / Tuloste (Data)".into(),
+            category: StencilCategory::FlowAndNet,
+            default_label: "Data".into(),
+            default_value: "".into(),
+            default_width_mm: 36.0,
+            default_height_mm: 18.0,
+            default_layer: "Oletus".into(),
+            stroke_color: [147, 51, 234, 255],
+            fill_color: [243, 232, 255, 255],
+            stroke_width: 1.8,
+            ports: four_cardinal_ports(),
+            geometry: vec![PrimOp::Polyline {
+                points: vec![(0.2, 0.0), (1.0, 0.0), (0.8, 1.0), (0.0, 1.0)],
+                closed: true,
+                filled: true,
+            }],
+            is_dimension: false,
+            is_room_area: false,
+        },
+        StencilItem {
+            id: "flow_document".into(),
+            name: "Dokumentti / Raportti".into(),
+            category: StencilCategory::FlowAndNet,
+            default_label: "Raportti".into(),
+            default_value: "".into(),
+            default_width_mm: 36.0,
+            default_height_mm: 22.0,
+            default_layer: "Oletus".into(),
+            stroke_color: [202, 138, 4, 255],
+            fill_color: [254, 249, 195, 255],
+            stroke_width: 1.8,
+            ports: four_cardinal_ports(),
+            geometry: vec![PrimOp::Polyline {
+                points: vec![
+                    (0.0, 0.0), (1.0, 0.0), (1.0, 0.85),
+                    (0.75, 1.0), (0.5, 0.88), (0.25, 0.95), (0.0, 0.82),
+                ],
+                closed: true,
+                filled: true,
+            }],
+            is_dimension: false,
+            is_room_area: false,
+        },
+        StencilItem {
+            id: "flow_database".into(),
+            name: "Tietokanta / Levytallennus".into(),
+            category: StencilCategory::FlowAndNet,
+            default_label: "Kanta".into(),
+            default_value: "".into(),
+            default_width_mm: 32.0,
+            default_height_mm: 26.0,
+            default_layer: "Oletus".into(),
+            stroke_color: [2, 132, 199, 255],
+            fill_color: [224, 242, 254, 255],
+            stroke_width: 1.8,
+            ports: four_cardinal_ports(),
+            geometry: vec![
+                PrimOp::Path {
+                    points: vec![
+                        (0.0, 0.2), (1.0, 0.2), (1.0, 0.8),
+                        (0.8, 0.95), (0.5, 1.0), (0.2, 0.95), (0.0, 0.8),
+                    ],
+                    closed: true,
+                    filled: true,
+                    fill_color: None,
+                    stroke_color: None,
+                    stroke_width: None,
+                },
+                PrimOp::Ellipse {
+                    cx: 0.5,
+                    cy: 0.2,
+                    rx: 0.5,
+                    ry: 0.15,
+                    filled: true,
+                    fill_color: None,
+                    stroke_color: None,
+                },
+            ],
+            is_dimension: false,
+            is_room_area: false,
+        },
+        StencilItem {
+            id: "flow_circle".into(),
+            name: "Yhdysmerkki / Tila (Pallo)".into(),
+            category: StencilCategory::FlowAndNet,
+            default_label: "A".into(),
+            default_value: "".into(),
+            default_width_mm: 18.0,
+            default_height_mm: 18.0,
+            default_layer: "Oletus".into(),
+            stroke_color: [71, 85, 105, 255],
+            fill_color: [241, 245, 249, 255],
+            stroke_width: 1.8,
+            ports: four_cardinal_ports(),
+            geometry: vec![PrimOp::Circle { cx: 0.5, cy: 0.5, r: 0.5, filled: true }],
             is_dimension: false,
             is_room_area: false,
         },

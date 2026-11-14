@@ -308,4 +308,71 @@ mod tests {
         assert!(imported.pages[0].width_mm >= 297.0);
         assert!(imported.pages[0].height_mm >= 210.0);
     }
+
+    #[test]
+    fn test_flowchart_inside_text_and_stencil_labels() {
+        use crate::formats::export::shape_display_caption;
+        use crate::model::{DiagramPage, TextPosition};
+        use crate::stencils::{instantiate_shape, StencilCategory, StencilItem};
+
+        let page = DiagramPage::default();
+
+        // 1. Process block text is centered inside
+        let mut proc = instantiate_shape("flow_process", 1, 100.0, 50.0, 1).expect("flow_process");
+        assert_eq!(proc.effective_text_position(), TextPosition::Center);
+        assert_eq!(proc.label_position(), Point::new(100.0, 50.0));
+        assert_eq!(shape_display_caption(&page, &proc), "Prosessi");
+
+        // 2. Multiline text inside process block
+        proc.label = "Vaihe 1:\nSyötä data".to_string();
+        assert_eq!(shape_display_caption(&page, &proc), "Vaihe 1:\nSyötä data");
+        assert_eq!(proc.label_position(), Point::new(100.0, 50.0));
+
+        // 3. Decision block default label is clean "Ehto" (no unwanted counter numbers like "Ehto6")
+        let dec = instantiate_shape("flow_decision", 2, 100.0, 90.0, 6).expect("flow_decision");
+        assert_eq!(dec.label, "Ehto");
+        assert_eq!(dec.effective_text_position(), TextPosition::Center);
+        assert_eq!(dec.label_position(), Point::new(100.0, 90.0));
+
+        // 4. Other flowchart stencils
+        assert!(instantiate_shape("flow_start_end", 3, 10.0, 10.0, 1).is_some());
+        assert!(instantiate_shape("flow_io", 4, 10.0, 10.0, 1).is_some());
+        assert!(instantiate_shape("flow_document", 5, 10.0, 10.0, 1).is_some());
+        assert!(instantiate_shape("flow_database", 6, 10.0, 10.0, 1).is_some());
+        assert!(instantiate_shape("flow_circle", 7, 10.0, 10.0, 1).is_some());
+
+        // 5. Imported stencil without custom text has NO floating label
+        let imported_item = StencilItem {
+            id: "vssx_icons_book".into(),
+            name: "Book".into(),
+            category: StencilCategory::ImportedVisio("icons".into()),
+            default_label: "Book".into(),
+            default_value: "".into(),
+            default_width_mm: 20.0,
+            default_height_mm: 20.0,
+            default_layer: "Oletus".into(),
+            stroke_color: [30, 41, 59, 255],
+            fill_color: [241, 245, 249, 255],
+            stroke_width: 1.5,
+            ports: Vec::new(),
+            geometry: Vec::new(),
+            is_dimension: false,
+            is_room_area: false,
+        };
+        let mut icon_shape = imported_item.instantiate(8, 50.0, 50.0, 1);
+        assert_eq!(icon_shape.label, "");
+        assert_eq!(shape_display_caption(&page, &icon_shape), "");
+
+        // 6. User can add text and position it or hide it
+        icon_shape.label = "Käsikirja".into();
+        assert_eq!(shape_display_caption(&page, &icon_shape), "Käsikirja");
+        assert_eq!(icon_shape.effective_text_position(), TextPosition::Bottom);
+        assert!(icon_shape.label_position().y > 50.0);
+
+        icon_shape.text_position = TextPosition::Hidden;
+        assert_eq!(shape_display_caption(&page, &icon_shape), "");
+
+        icon_shape.text_position = TextPosition::Center;
+        assert_eq!(icon_shape.label_position(), Point::new(50.0, 50.0));
+    }
 }
