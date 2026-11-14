@@ -1,0 +1,33 @@
+use eframe::egui;
+use photon_vision::formats::load_document_from_path;
+use photon_vision::gui::PhotonVisionApp;
+use std::path::PathBuf;
+
+fn main() -> eframe::Result<()> {
+    env_logger::init();
+
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1480.0, 920.0])
+            .with_min_inner_size([960.0, 620.0])
+            .with_title("PhotonVision — Sähkökaaviot, Pohjapiirustukset & Microsoft Visio (.vsdx/.vdx/.vsd)"),
+        ..Default::default()
+    };
+
+    let cli_file = std::env::args().nth(1).map(PathBuf::from);
+
+    eframe::run_native(
+        "PhotonVision",
+        native_options,
+        Box::new(move |cc| {
+            let mut app = PhotonVisionApp::new(cc);
+            if let Some(path) = cli_file {
+                if let Ok(doc) = load_document_from_path(&path) {
+                    app.doc = doc;
+                    app.current_file = Some(path);
+                }
+            }
+            Ok(Box::new(app))
+        }),
+    )
+}

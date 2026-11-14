@@ -1,0 +1,25 @@
+[package]
+name = "photon_vision"
+version = "1.0.0"
+edition = "2021"
+authors = ["Niko Pietinen"]
+description = "PhotonVision – Modern, high-performance Visio replacement for electrical schematics, wiring diagrams, floor plans, and technical drawings with full .vsdx, .vdx, .vsd, .vssx, .svg, and .dxf support."
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+roxmltree = "0.20"
+miniz_oxide = "0.8"
+crc32fast = "1.4"
+eframe = { version = "0.31", features = ["persistence"] }
+rfd = "0.15"
+log = "0.4"
+env_logger = "0.11"
+
+[lib]
+name = "photon_vision"
+path = "src/lib.rs"
+
+[[bin]]
+name = "photon_vision"
+path = "src/main.rs"
