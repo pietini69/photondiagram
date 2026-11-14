@@ -404,4 +404,68 @@ mod tests {
         custom.font_size = 14.5;
         assert_eq!(custom.font_size, 14.5);
     }
+
+    #[test]
+    fn test_layer_order_and_z_ordering() {
+        use crate::model::{DiagramPage, Point};
+        use crate::stencils::instantiate_shape;
+
+        let mut page = DiagramPage::default();
+
+        // 1. By default, "Mitat & Tekstit" is the topmost layer (index 0)
+        assert_eq!(page.layers[0].name, "Mitat & Tekstit");
+
+        // 2. Create a background flowchart process block on "Oletus" at (100, 100)
+        let mut proc = instantiate_shape("flow_process", 1, 100.0, 100.0, 1).unwrap();
+        proc.layer = "Oletus".to_string();
+        proc.width = 50.0;
+        proc.height = 30.0;
+        page.shapes.push(proc);
+
+        // 3. Create a text box on "Mitat & Tekstit" directly overlapping at (100, 100)
+        let mut txt = instantiate_shape("note_textbox", 2, 100.0, 100.0, 1).unwrap();
+        txt.layer = "Mitat & Tekstit".to_string();
+        txt.width = 40.0;
+        txt.height = 20.0;
+        page.shapes.push(txt);
+
+        // Topmost shape found at (100, 100) MUST be the text box (id 2)
+        let hit = page.find_shape_at(Point::new(100.0, 100.0), 1.0).expect("Shape not found");
+        assert_eq!(hit.id, 2);
+
+        // 4. Move "Mitat & Tekstit" down to the bottom
+        let len = page.layers.len();
+        for i in 0..len - 1 {
+            page.move_layer_down(i);
+        }
+        assert_eq!(page.layers.last().unwrap().name, "Mitat & Tekstit");
+
+        // Now "Oletus" is above "Mitat & Tekstit", so find_shape_at returns the process block (id 1)!
+        let hit2 = page.find_shape_at(Point::new(100.0, 100.0), 1.0).expect("Shape not found");
+        assert_eq!(hit2.id, 1);
+
+        // 5. One-click bring layer to top
+        page.bring_layer_to_top("Mitat & Tekstit");
+        assert_eq!(page.layers[0].name, "Mitat & Tekstit");
+        let hit3 = page.find_shape_at(Point::new(100.0, 100.0), 1.0).expect("Shape not found");
+        assert_eq!(hit3.id, 2);
+
+        // 6. Within the same layer, test shape z-ordering (bring_to_front / send_to_back)
+        let mut txt2 = instantiate_shape("note_textbox", 3, 100.0, 100.0, 2).unwrap();
+        txt2.layer = "Mitat & Tekstit".to_string();
+        page.shapes.push(txt2); // id 3 pushed last, on top of id 2
+
+        let hit4 = page.find_shape_at(Point::new(100.0, 100.0), 1.0).unwrap();
+        assert_eq!(hit4.id, 3);
+
+        // Send id 3 to back
+        page.send_to_back(3);
+        let hit5 = page.find_shape_at(Point::new(100.0, 100.0), 1.0).unwrap();
+        assert_eq!(hit5.id, 2);
+
+        // Bring id 3 to front again
+        page.bring_to_front(3);
+        let hit6 = page.find_shape_at(Point::new(100.0, 100.0), 1.0).unwrap();
+        assert_eq!(hit6.id, 3);
+    }
 }

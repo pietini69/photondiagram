@@ -485,16 +485,10 @@ impl Default for DiagramPage {
             connectors: Vec::new(),
             layers: vec![
                 LayerInfo {
-                    name: "Oletus".to_string(),
+                    name: "Mitat & Tekstit".to_string(),
                     visible: true,
                     locked: false,
-                    color: [30, 41, 59, 255],
-                },
-                LayerInfo {
-                    name: "Rakenteet & Seinät".to_string(),
-                    visible: true,
-                    locked: false,
-                    color: [51, 65, 85, 255],
+                    color: [22, 163, 74, 255],
                 },
                 LayerInfo {
                     name: "Sähkö & Kytkennät".to_string(),
@@ -509,13 +503,120 @@ impl Default for DiagramPage {
                     color: [2, 132, 199, 255],
                 },
                 LayerInfo {
-                    name: "Mitat & Tekstit".to_string(),
+                    name: "Rakenteet & Seinät".to_string(),
                     visible: true,
                     locked: false,
-                    color: [22, 163, 74, 255],
+                    color: [51, 65, 85, 255],
+                },
+                LayerInfo {
+                    name: "Oletus".to_string(),
+                    visible: true,
+                    locked: false,
+                    color: [30, 41, 59, 255],
                 },
             ],
         }
+    }
+}
+
+impl DiagramPage {
+    /// Moves the specified shape to the very top (rendered last, in front of all shapes on its layer)
+    pub fn bring_to_front(&mut self, shape_id: u64) {
+        if let Some(idx) = self.shapes.iter().position(|s| s.id == shape_id) {
+            let shape = self.shapes.remove(idx);
+            self.shapes.push(shape);
+        }
+    }
+
+    /// Moves the specified shape to the very bottom (rendered first, in the background)
+    pub fn send_to_back(&mut self, shape_id: u64) {
+        if let Some(idx) = self.shapes.iter().position(|s| s.id == shape_id) {
+            let shape = self.shapes.remove(idx);
+            self.shapes.insert(0, shape);
+        }
+    }
+
+    /// Moves the specified shape one step forward in z-order
+    pub fn bring_forward(&mut self, shape_id: u64) {
+        if let Some(idx) = self.shapes.iter().position(|s| s.id == shape_id) {
+            if idx + 1 < self.shapes.len() {
+                self.shapes.swap(idx, idx + 1);
+            }
+        }
+    }
+
+    /// Moves the specified shape one step backward in z-order
+    pub fn send_backward(&mut self, shape_id: u64) {
+        if let Some(idx) = self.shapes.iter().position(|s| s.id == shape_id) {
+            if idx > 0 {
+                self.shapes.swap(idx, idx - 1);
+            }
+        }
+    }
+
+    /// Moves a layer up in the stack (closer to foreground / index 0)
+    pub fn move_layer_up(&mut self, idx: usize) {
+        if idx > 0 && idx < self.layers.len() {
+            self.layers.swap(idx, idx - 1);
+        }
+    }
+
+    /// Moves a layer down in the stack (closer to background / bottom)
+    pub fn move_layer_down(&mut self, idx: usize) {
+        if idx + 1 < self.layers.len() {
+            self.layers.swap(idx, idx + 1);
+        }
+    }
+
+    /// Brings the named layer to the very top (index 0 / foremost layer)
+    pub fn bring_layer_to_top(&mut self, name: &str) {
+        if let Some(idx) = self.layers.iter().position(|l| l.name == name) {
+            if idx > 0 {
+                let layer = self.layers.remove(idx);
+                self.layers.insert(0, layer);
+            }
+        }
+    }
+
+    /// Finds the topmost shape at the given point, respecting layer visibility, locks, and layer z-order.
+    pub fn find_shape_at(&self, p: Point, tol_mm: f64) -> Option<&DiagramShape> {
+        // 1. Check layers from topmost (index 0) down to bottommost (last index)
+        for layer in &self.layers {
+            if !layer.visible || layer.locked {
+                continue;
+            }
+            // Check non-room shapes on this layer in reverse creation order (newest first)
+            if let Some(s) = self
+                .shapes
+                .iter()
+                .rev()
+                .find(|s| !s.is_room_area && s.layer == layer.name && s.contains_point(p, tol_mm))
+            {
+                return Some(s);
+            }
+        }
+
+        // 2. Check room areas on visible layers
+        for layer in &self.layers {
+            if !layer.visible || layer.locked {
+                continue;
+            }
+            if let Some(s) = self
+                .shapes
+                .iter()
+                .rev()
+                .find(|s| s.is_room_area && s.layer == layer.name && s.contains_point(p, tol_mm))
+            {
+                return Some(s);
+            }
+        }
+
+        // 3. Fallback: check any shapes whose layer is unlisted
+        let known_layers: Vec<&str> = self.layers.iter().map(|l| l.name.as_str()).collect();
+        self.shapes
+            .iter()
+            .rev()
+            .find(|s| !known_layers.contains(&s.layer.as_str()) && s.contains_point(p, tol_mm))
     }
 }
 

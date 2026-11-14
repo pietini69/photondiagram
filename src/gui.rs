@@ -432,6 +432,26 @@ impl eframe::App for PhotonVisionApp {
                 if i.modifiers.command && i.key_pressed(Key::D) {
                     self.duplicate_selected();
                 }
+                if i.modifiers.command && i.key_pressed(Key::CloseBracket) {
+                    if let Some(sid) = self.selected_shape_id {
+                        self.push_undo();
+                        if i.modifiers.shift {
+                            self.doc.current_page_mut().bring_to_front(sid);
+                        } else {
+                            self.doc.current_page_mut().bring_forward(sid);
+                        }
+                    }
+                }
+                if i.modifiers.command && i.key_pressed(Key::OpenBracket) {
+                    if let Some(sid) = self.selected_shape_id {
+                        self.push_undo();
+                        if i.modifiers.shift {
+                            self.doc.current_page_mut().send_to_back(sid);
+                        } else {
+                            self.doc.current_page_mut().send_backward(sid);
+                        }
+                    }
+                }
             });
         }
 
@@ -810,14 +830,16 @@ impl PhotonVisionApp {
                     .collect();
 
                 if let Some(sid) = self.selected_shape_id {
-                    let page = self.doc.current_page_mut();
-                    if let Some(shape) = page.shapes.iter_mut().find(|s| s.id == sid) {
-                        ui.label(
-                            egui::RichText::new(format!("Komponentti: {}", shape.name)).strong(),
-                        );
-                        ui.add_space(4.0);
+                    let mut z_action: Option<&'static str> = None;
+                    {
+                        let page = self.doc.current_page_mut();
+                        if let Some(shape) = page.shapes.iter_mut().find(|s| s.id == sid) {
+                            ui.label(
+                                egui::RichText::new(format!("Komponentti: {}", shape.name)).strong(),
+                            );
+                            ui.add_space(4.0);
 
-                        egui::Grid::new("shape_props_grid")
+                            egui::Grid::new("shape_props_grid")
                             .num_columns(2)
                             .spacing([8.0, 6.0])
                             .show(ui, |ui| {
@@ -1006,11 +1028,56 @@ impl PhotonVisionApp {
                                         }
                                     });
                                 ui.end_row();
+
+                                ui.label("Järjestys (Z-Order):");
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .small_button("⏫ Ylimmäksi")
+                                        .on_hover_text("Tuo etualalle (Bring to Front) • Cmd+Shift+]")
+                                        .clicked()
+                                    {
+                                        z_action = Some("front");
+                                    }
+                                    if ui
+                                        .small_button("🔼 Eteen")
+                                        .on_hover_text("Siirrä askel eteenpäin (Bring Forward) • Cmd+]")
+                                        .clicked()
+                                    {
+                                        z_action = Some("forward");
+                                    }
+                                    if ui
+                                        .small_button("🔽 Taakse")
+                                        .on_hover_text("Siirrä askel taaksepäin (Send Backward) • Cmd+[")
+                                        .clicked()
+                                    {
+                                        z_action = Some("backward");
+                                    }
+                                    if ui
+                                        .small_button("⏬ Alimmaksi")
+                                        .on_hover_text("Vie taustalle (Send to Back) • Cmd+Shift+[")
+                                        .clicked()
+                                    {
+                                        z_action = Some("back");
+                                    }
+                                });
+                                ui.end_row();
                             });
 
                         update_all_connectors(&mut page.connectors, &page.shapes);
                     }
-                } else if let Some(cid) = self.selected_connector_id {
+                }
+
+                if let Some(act) = z_action {
+                    self.push_undo();
+                    match act {
+                        "front" => self.doc.current_page_mut().bring_to_front(sid),
+                        "forward" => self.doc.current_page_mut().bring_forward(sid),
+                        "backward" => self.doc.current_page_mut().send_backward(sid),
+                        "back" => self.doc.current_page_mut().send_to_back(sid),
+                        _ => {}
+                    }
+                }
+            } else if let Some(cid) = self.selected_connector_id {
                     let page = self.doc.current_page_mut();
                     if let Some(conn) = page.connectors.iter_mut().find(|c| c.id == cid) {
                         ui.label(egui::RichText::new("🔌 Johdin / Yhdysviiva").strong());
@@ -1136,21 +1203,79 @@ impl PhotonVisionApp {
                         });
                 }
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
                 ui.separator();
-                ui.heading("🗂 Tasot (Layers)");
-                for layer in &mut self.doc.current_page_mut().layers {
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut layer.visible, "");
-                        let c = Color32::from_rgba_unmultiplied(
-                            layer.color[0],
-                            layer.color[1],
-                            layer.color[2],
-                            255,
-                        );
-                        ui.colored_label(c, "●");
-                        ui.label(&layer.name);
+                ui.horizontal(|ui| {
+                    ui.heading("🗂 Tasot (Layers)");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .button("⬆️ Tekstit päällimmäiseksi")
+                            .on_hover_text("Tuo 'Mitat & Tekstit' -taso heti ylimmäksi")
+                            .clicked()
+                        {
+                            self.push_undo();
+                            self.doc.current_page_mut().bring_layer_to_top("Mitat & Tekstit");
+                        }
                     });
+                });
+                ui.label(
+                    egui::RichText::new("Ylin taso piirretään päällimmäiseksi. Käytä ▲/▼ -painikkeita järjestyksen vaihtoon.")
+                        .small()
+                        .weak(),
+                );
+                ui.add_space(4.0);
+
+                let mut move_up_idx: Option<usize> = None;
+                let mut move_down_idx: Option<usize> = None;
+
+                {
+                    let page = self.doc.current_page_mut();
+                    let num_layers = page.layers.len();
+
+                    for (idx, layer) in page.layers.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut layer.visible, "").on_hover_text("Näytä / piilota taso");
+                            let mut c = Color32::from_rgba_unmultiplied(
+                                layer.color[0],
+                                layer.color[1],
+                                layer.color[2],
+                                255,
+                            );
+                            if ui.color_edit_button_srgba(&mut c).changed() {
+                                layer.color = c.to_srgba_unmultiplied();
+                            }
+                            ui.label(egui::RichText::new(&layer.name).strong());
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if idx + 1 < num_layers {
+                                    if ui
+                                        .small_button("▼")
+                                        .on_hover_text("Siirrä taso alemmas (taustalle)")
+                                        .clicked()
+                                    {
+                                        move_down_idx = Some(idx);
+                                    }
+                                }
+                                if idx > 0 {
+                                    if ui
+                                        .small_button("▲")
+                                        .on_hover_text("Siirrä taso ylemmäs (etualalle)")
+                                        .clicked()
+                                    {
+                                        move_up_idx = Some(idx);
+                                    }
+                                }
+                            });
+                        });
+                    }
+                }
+
+                if let Some(idx) = move_up_idx {
+                    self.push_undo();
+                    self.doc.current_page_mut().move_layer_up(idx);
+                } else if let Some(idx) = move_down_idx {
+                    self.push_undo();
+                    self.doc.current_page_mut().move_layer_down(idx);
                 }
             });
     }
@@ -1233,90 +1358,106 @@ impl PhotonVisionApp {
                 // Draw Rulers (Top and Left)
                 draw_rulers(&painter, rect, origin, self.doc.current_page(), self.zoom_px_per_mm);
 
-                // Render shapes (rooms first so they stay in background, then other shapes)
+                // Render shapes & connectors strictly by layer z-order (from bottommost layer up to topmost)
                 let page_snapshot = self.doc.current_page().clone();
                 let mut hovered_port: Option<(u64, usize, Point)> = None;
                 let mouse_pos = response.hover_pos().or_else(|| ctx.pointer_interact_pos());
                 let mouse_mm = mouse_pos.map(|mp| self.screen_to_page(origin, mp));
 
-                for pass in 0..2 {
-                    for shape in &page_snapshot.shapes {
-                        if (pass == 0) != shape.is_room_area {
-                            continue;
-                        }
-                        if !page_snapshot
-                            .layers
-                            .iter()
-                            .find(|l| l.name == shape.layer)
-                            .map(|l| l.visible)
-                            .unwrap_or(true)
-                        {
-                            continue;
-                        }
-
-                        let is_selected = self.selected_shape_id == Some(shape.id);
-                        self.draw_shape_on_canvas(&painter, origin, &page_snapshot, shape, is_selected);
-
-                        // Draw connection ports dynamically:
-                        // Show ports only when the shape is selected, hovered, or when drawing wires nearby.
-                        let is_hovered = mouse_mm
-                            .map(|m| shape.contains_point(m, 1.5))
-                            .unwrap_or(false);
-                        let is_near_shape = mouse_mm
-                            .map(|m| shape.contains_point(m, 12.0))
-                            .unwrap_or(false);
-
-                        let show_ports = is_selected
-                            || is_hovered
-                            || (self.active_tool == ActiveTool::Wire && is_near_shape)
-                            || (self.wiring_from.is_some() && is_near_shape);
-
-                        if show_ports {
-                            for (p_idx, _port) in shape.ports.iter().enumerate() {
-                                let (p_world, _) = shape.port_world_pos_and_dir(p_idx);
-                                let sp = self.page_to_screen(origin, p_world);
-                                let is_near = mouse_mm
-                                    .map(|m| m.distance_to(p_world) <= 3.5)
-                                    .unwrap_or(false);
-                                if is_near {
-                                    hovered_port = Some((shape.id, p_idx, p_world));
-                                    painter.circle_filled(sp, 5.5, Color32::from_rgb(34, 197, 94));
-                                    painter.circle_stroke(
-                                        sp,
-                                        6.5,
-                                        Stroke::new(1.5_f32, Color32::WHITE),
-                                    );
-                                } else {
-                                    painter.circle_filled(
-                                        sp,
-                                        2.8,
-                                        Color32::from_rgba_unmultiplied(16, 185, 129, 190),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Render connectors & wire jumps
                 let jumps = if self.doc.show_line_jumps {
                     find_wire_jumps(&page_snapshot.connectors)
                 } else {
                     Vec::new()
                 };
 
+                let known_layers: Vec<&str> =
+                    page_snapshot.layers.iter().map(|l| l.name.as_str()).collect();
+
+                // Helper to render a shape and track port hovers
+                let mut render_shape = |shape: &DiagramShape| {
+                    let is_selected = self.selected_shape_id == Some(shape.id);
+                    self.draw_shape_on_canvas(&painter, origin, &page_snapshot, shape, is_selected);
+
+                    let is_hovered = mouse_mm
+                        .map(|m| shape.contains_point(m, 1.5))
+                        .unwrap_or(false);
+                    let is_near_shape = mouse_mm
+                        .map(|m| shape.contains_point(m, 12.0))
+                        .unwrap_or(false);
+
+                    let show_ports = is_selected
+                        || is_hovered
+                        || (self.active_tool == ActiveTool::Wire && is_near_shape)
+                        || (self.wiring_from.is_some() && is_near_shape);
+
+                    if show_ports {
+                        for (p_idx, _port) in shape.ports.iter().enumerate() {
+                            let (p_world, _) = shape.port_world_pos_and_dir(p_idx);
+                            let sp = self.page_to_screen(origin, p_world);
+                            let is_near = mouse_mm
+                                .map(|m| m.distance_to(p_world) <= 3.5)
+                                .unwrap_or(false);
+                            if is_near {
+                                hovered_port = Some((shape.id, p_idx, p_world));
+                                painter.circle_filled(sp, 5.5, Color32::from_rgb(34, 197, 94));
+                                painter.circle_stroke(
+                                    sp,
+                                    6.5,
+                                    Stroke::new(1.5_f32, Color32::WHITE),
+                                );
+                            } else {
+                                painter.circle_filled(
+                                    sp,
+                                    2.8,
+                                    Color32::from_rgba_unmultiplied(16, 185, 129, 190),
+                                );
+                            }
+                        }
+                    }
+                };
+
+                // 1. Draw any orphan shapes / connectors whose layer is not in page.layers
+                for shape in &page_snapshot.shapes {
+                    if shape.is_room_area && !known_layers.contains(&shape.layer.as_str()) {
+                        render_shape(shape);
+                    }
+                }
+                for shape in &page_snapshot.shapes {
+                    if !shape.is_room_area && !known_layers.contains(&shape.layer.as_str()) {
+                        render_shape(shape);
+                    }
+                }
                 for conn in &page_snapshot.connectors {
-                    if !page_snapshot
-                        .layers
-                        .iter()
-                        .find(|l| l.name == conn.layer)
-                        .map(|l| l.visible)
-                        .unwrap_or(true)
-                    {
+                    if !known_layers.contains(&conn.layer.as_str()) {
+                        let is_sel = self.selected_connector_id == Some(conn.id);
+                        self.draw_connector_on_canvas(&painter, origin, conn, &jumps, is_sel);
+                    }
+                }
+
+                // 2. Draw layers from bottom (last index) to top (index 0)
+                for layer in page_snapshot.layers.iter().rev() {
+                    if !layer.visible {
                         continue;
                     }
-                    let is_sel = self.selected_connector_id == Some(conn.id);
-                    self.draw_connector_on_canvas(&painter, origin, conn, &jumps, is_sel);
+                    // Pass 0: Room areas on this layer
+                    for shape in &page_snapshot.shapes {
+                        if shape.is_room_area && shape.layer == layer.name {
+                            render_shape(shape);
+                        }
+                    }
+                    // Pass 1: Regular shapes on this layer (in shapes vector order)
+                    for shape in &page_snapshot.shapes {
+                        if !shape.is_room_area && shape.layer == layer.name {
+                            render_shape(shape);
+                        }
+                    }
+                    // Pass 2: Connectors on this layer
+                    for conn in &page_snapshot.connectors {
+                        if conn.layer == layer.name {
+                            let is_sel = self.selected_connector_id == Some(conn.id);
+                            self.draw_connector_on_canvas(&painter, origin, conn, &jumps, is_sel);
+                        }
+                    }
                 }
 
                 // Draw active wire preview while dragging a new connection
@@ -1361,6 +1502,108 @@ impl PhotonVisionApp {
 
                 // Handle Canvas Mouse Interactions
                 self.handle_canvas_interactions(&response, origin, hovered_port, mouse_mm);
+
+                // Right-click Context Menu for element & canvas actions
+                response.context_menu(|ui| {
+                    if let Some(sid) = self.selected_shape_id {
+                        ui.label(egui::RichText::new("Elementin toiminnot").strong());
+                        ui.separator();
+                        if ui.button("✏️ Muokkaa tekstiä...").clicked() {
+                            self.editing_shape_id = Some(sid);
+                            self.focus_text_edit = true;
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui
+                            .button("⏫ Tuo etualalle (Bring to Front)      Cmd+Shift+]")
+                            .clicked()
+                        {
+                            self.push_undo();
+                            self.doc.current_page_mut().bring_to_front(sid);
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button("🔼 Siirrä eteenpäin (Bring Forward)  Cmd+]")
+                            .clicked()
+                        {
+                            self.push_undo();
+                            self.doc.current_page_mut().bring_forward(sid);
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button("🔽 Siirrä taaksepäin (Send Backward) Cmd+[")
+                            .clicked()
+                        {
+                            self.push_undo();
+                            self.doc.current_page_mut().send_backward(sid);
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button("⏬ Vie taustalle (Send to Back)        Cmd+Shift+[")
+                            .clicked()
+                        {
+                            self.push_undo();
+                            self.doc.current_page_mut().send_to_back(sid);
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("📋 Kahdenna (Duplicate)                 Cmd+D").clicked() {
+                            self.duplicate_selected();
+                            ui.close_menu();
+                        }
+                        if ui.button("🔄 Kierrä 90°                           R").clicked() {
+                            self.rotate_selected(90.0);
+                            ui.close_menu();
+                        }
+                        if ui.button("🗑️ Poista                              Del").clicked() {
+                            self.delete_selected();
+                            ui.close_menu();
+                        }
+                    } else {
+                        ui.label(egui::RichText::new("Kaavion toiminnot").strong());
+                        ui.separator();
+                        if ui.button("🔤 Lisää tekstilaatikko tähän").clicked() {
+                            if let Some(mp) = mouse_mm {
+                                self.push_undo();
+                                let id = self.doc.alloc_id();
+                                let count = self.doc.current_page().shapes.len() + 1;
+                                if let Some(mut sh) = instantiate_shape("note_textbox", id, mp.x, mp.y, count) {
+                                    sh.label.clear();
+                                    self.doc.current_page_mut().shapes.push(sh);
+                                    self.selected_shape_id = Some(id);
+                                    self.editing_shape_id = Some(id);
+                                    self.focus_text_edit = true;
+                                }
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button("💬 Lisää huomautuskupla (Callout)").clicked() {
+                            if let Some(mp) = mouse_mm {
+                                self.push_undo();
+                                let id = self.doc.alloc_id();
+                                let count = self.doc.current_page().shapes.len() + 1;
+                                if let Some(sh) = instantiate_shape("note_callout", id, mp.x, mp.y, count) {
+                                    self.doc.current_page_mut().shapes.push(sh);
+                                    self.selected_shape_id = Some(id);
+                                    self.editing_shape_id = Some(id);
+                                    self.focus_text_edit = true;
+                                }
+                            }
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("⬆️ Tuo tekstit päällimmäiseksi").clicked() {
+                            self.push_undo();
+                            self.doc.current_page_mut().bring_layer_to_top("Mitat & Tekstit");
+                            ui.close_menu();
+                        }
+                        if ui.button("🔍 Nollaa zoomi (100%)").clicked() {
+                            self.zoom_px_per_mm = 3.78;
+                            self.pan_offset = Vec2::ZERO;
+                            ui.close_menu();
+                        }
+                    }
+                });
             });
     }
 
@@ -1485,6 +1728,16 @@ impl PhotonVisionApp {
             return;
         };
 
+        // Right-click: select shape at pointer before context menu opens
+        if response.secondary_clicked() {
+            if let Some(sh) = self.doc.current_page().find_shape_at(cur_mm, 1.5) {
+                self.selected_shape_id = Some(sh.id);
+                self.selected_connector_id = None;
+            } else {
+                self.selected_shape_id = None;
+            }
+        }
+
         // 1. Place armed stencil on click or place text box
         if response.clicked() {
             if self.active_tool == ActiveTool::DrawText {
@@ -1581,23 +1834,8 @@ impl PhotonVisionApp {
                 }
             }
 
-            // Hit-test non-room shapes first, then room shapes
-            let hit_shape = self
-                .doc
-                .current_page()
-                .shapes
-                .iter()
-                .rev()
-                .find(|s| !s.is_room_area && s.contains_point(cur_mm, 1.5))
-                .or_else(|| {
-                    self.doc
-                        .current_page()
-                        .shapes
-                        .iter()
-                        .rev()
-                        .find(|s| s.is_room_area && s.contains_point(cur_mm, 1.5))
-                })
-                .cloned();
+            // Hit-test shapes respecting layer z-order
+            let hit_shape = self.doc.current_page().find_shape_at(cur_mm, 1.5).cloned();
 
             if let Some(sh) = hit_shape {
                 self.push_undo();
@@ -1788,19 +2026,7 @@ impl PhotonVisionApp {
         // Double-click to directly edit text inside a shape
         if response.double_clicked() && self.pending_stencil_id.is_none() {
             let page = self.doc.current_page();
-            let hit = page
-                .shapes
-                .iter()
-                .rev()
-                .find(|s| !s.is_room_area && s.contains_point(cur_mm, 1.5))
-                .or_else(|| {
-                    page.shapes
-                        .iter()
-                        .rev()
-                        .find(|s| s.is_room_area && s.contains_point(cur_mm, 1.5))
-                });
-
-            if let Some(s) = hit {
+            if let Some(s) = page.find_shape_at(cur_mm, 1.5) {
                 self.selected_shape_id = Some(s.id);
                 self.selected_connector_id = None;
                 self.editing_shape_id = Some(s.id);
@@ -1816,7 +2042,15 @@ impl PhotonVisionApp {
                 self.focus_text_edit = false;
             }
             let page = self.doc.current_page();
-            // Hit-test connectors first
+
+            // Hit-test shapes respecting layer z-order first (so text boxes / shapes above wires get clicked)
+            if let Some(s) = page.find_shape_at(cur_mm, 1.5) {
+                self.selected_shape_id = Some(s.id);
+                self.selected_connector_id = None;
+                return;
+            }
+
+            // Hit-test connectors if no shape was clicked
             if let Some(conn) = page
                 .connectors
                 .iter()
@@ -1827,26 +2061,8 @@ impl PhotonVisionApp {
                 return;
             }
 
-            // Hit-test foreground shapes then rooms
-            let hit = page
-                .shapes
-                .iter()
-                .rev()
-                .find(|s| !s.is_room_area && s.contains_point(cur_mm, 1.5))
-                .or_else(|| {
-                    page.shapes
-                        .iter()
-                        .rev()
-                        .find(|s| s.is_room_area && s.contains_point(cur_mm, 1.5))
-                });
-
-            if let Some(s) = hit {
-                self.selected_shape_id = Some(s.id);
-                self.selected_connector_id = None;
-            } else {
-                self.selected_shape_id = None;
-                self.selected_connector_id = None;
-            }
+            self.selected_shape_id = None;
+            self.selected_connector_id = None;
         }
 
         let _ = origin;
