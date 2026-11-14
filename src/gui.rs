@@ -51,6 +51,7 @@ pub struct PhotonVisionApp {
     pub active_tool: ActiveTool,
     pub pending_stencil_id: Option<String>,
     pub selected_shape_id: Option<u64>,
+    pub selected_shape_ids: Vec<u64>,
     pub selected_connector_id: Option<u64>,
     pub editing_shape_id: Option<u64>,
     pub focus_text_edit: bool,
@@ -71,6 +72,9 @@ pub struct PhotonVisionApp {
     drag_start_mouse_mm: Point,
     drag_start_shape_pos: Point,
     drag_start_shape_size: (f64, f64),
+    drag_start_group_positions: Vec<(u64, Point)>,
+    marquee_drag_start_mm: Option<Point>,
+    marquee_current_mm: Option<Point>,
     active_resize_handle: Option<ResizeHandle>,
 
     // Interactive wire creation state: (from_shape_id, from_port_idx, start_pos_mm)
@@ -119,6 +123,7 @@ impl Default for PhotonVisionApp {
             active_tool: ActiveTool::Select,
             pending_stencil_id: None,
             selected_shape_id: None,
+            selected_shape_ids: Vec::new(),
             selected_connector_id: None,
             editing_shape_id: None,
             focus_text_edit: false,
@@ -133,6 +138,9 @@ impl Default for PhotonVisionApp {
             drag_start_mouse_mm: Point::ZERO,
             drag_start_shape_pos: Point::ZERO,
             drag_start_shape_size: (0.0, 0.0),
+            drag_start_group_positions: Vec::new(),
+            marquee_drag_start_mm: None,
+            marquee_current_mm: None,
             active_resize_handle: None,
             wiring_from: None,
             creation_drag_start_mm: None,
@@ -206,26 +214,77 @@ impl PhotonVisionApp {
         Point::new(x as f64, y as f64)
     }
 
+    pub fn is_shape_selected(&self, id: u64) -> bool {
+        self.selected_shape_id == Some(id) || self.selected_shape_ids.contains(&id)
+    }
+
+    pub fn selected_shape_ids(&self) -> Vec<u64> {
+        let mut ids = self.selected_shape_ids.clone();
+        if let Some(id) = self.selected_shape_id {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
+    pub fn select_single_shape(&mut self, id: u64) {
+        self.selected_shape_id = Some(id);
+        self.selected_shape_ids = vec![id];
+        self.selected_connector_id = None;
+    }
+
+    pub fn select_shapes(&mut self, ids: Vec<u64>) {
+        self.selected_shape_id = ids.last().copied();
+        self.selected_shape_ids = ids;
+        self.selected_connector_id = None;
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected_shape_id = None;
+        self.selected_shape_ids.clear();
+        self.selected_connector_id = None;
+    }
+
+    pub fn toggle_shape_selection(&mut self, id: u64) {
+        if self.is_shape_selected(id) {
+            self.selected_shape_ids.retain(|&x| x != id);
+            if self.selected_shape_id == Some(id) {
+                self.selected_shape_id = self.selected_shape_ids.last().copied();
+            }
+        } else {
+            self.selected_shape_ids.push(id);
+            self.selected_shape_id = Some(id);
+            self.selected_connector_id = None;
+        }
+    }
+
     fn rotate_selected(&mut self, delta_deg: f64) {
-        if let Some(sid) = self.selected_shape_id {
+        let sids = self.selected_shape_ids();
+        if !sids.is_empty() {
             self.push_undo();
             let page = self.doc.current_page_mut();
-            if let Some(s) = page.shapes.iter_mut().find(|s| s.id == sid) {
-                s.rotation_deg = (s.rotation_deg + delta_deg).rem_euclid(360.0);
+            for s in &mut page.shapes {
+                if sids.contains(&s.id) {
+                    s.rotation_deg = (s.rotation_deg + delta_deg).rem_euclid(360.0);
+                }
             }
             update_all_connectors(&mut page.connectors, &page.shapes);
         }
     }
 
     fn flip_selected(&mut self, horizontal: bool) {
-        if let Some(sid) = self.selected_shape_id {
+        let sids = self.selected_shape_ids();
+        if !sids.is_empty() {
             self.push_undo();
             let page = self.doc.current_page_mut();
-            if let Some(s) = page.shapes.iter_mut().find(|s| s.id == sid) {
-                if horizontal {
-                    s.flip_x = !s.flip_x;
-                } else {
-                    s.flip_y = !s.flip_y;
+            for s in &mut page.shapes {
+                if sids.contains(&s.id) {
+                    if horizontal {
+                        s.flip_x = !s.flip_x;
+                    } else {
+                        s.flip_y = !s.flip_y;
+                    }
                 }
             }
             update_all_connectors(&mut page.connectors, &page.shapes);
@@ -233,13 +292,21 @@ impl PhotonVisionApp {
     }
 
     fn delete_selected(&mut self) {
-        if let Some(sid) = self.selected_shape_id.take() {
+        let sids = self.selected_shape_ids();
+        if !sids.is_empty() {
             self.push_undo();
             let page = self.doc.current_page_mut();
-            page.shapes.retain(|s| s.id != sid);
+            page.shapes.retain(|s| !sids.contains(&s.id));
             page.connectors
-                .retain(|c| c.from_shape != Some(sid) && c.to_shape != Some(sid));
-            self.status_msg = "Komponentti poistettu.".to_string();
+                .retain(|c| !c.from_shape.map_or(false, |id| sids.contains(&id))
+                         && !c.to_shape.map_or(false, |id| sids.contains(&id)));
+            let count = sids.len();
+            self.clear_selection();
+            self.status_msg = if count == 1 {
+                "Komponentti poistettu.".to_string()
+            } else {
+                format!("{} komponenttia poistettu.", count)
+            };
         } else if let Some(cid) = self.selected_connector_id.take() {
             self.push_undo();
             let page = self.doc.current_page_mut();
@@ -249,24 +316,34 @@ impl PhotonVisionApp {
     }
 
     fn duplicate_selected(&mut self) {
-        if let Some(sid) = self.selected_shape_id {
-            let cloned = self
+        let sids = self.selected_shape_ids();
+        if !sids.is_empty() {
+            self.push_undo();
+            let mut new_ids = Vec::new();
+            let shapes_to_clone: Vec<DiagramShape> = self
                 .doc
                 .current_page()
                 .shapes
                 .iter()
-                .find(|s| s.id == sid)
-                .cloned();
-            if let Some(mut s) = cloned {
-                self.push_undo();
+                .filter(|s| sids.contains(&s.id))
+                .cloned()
+                .collect();
+
+            for mut s in shapes_to_clone {
                 let new_id = self.doc.alloc_id();
                 s.id = new_id;
                 s.x += 10.0;
                 s.y += 10.0;
+                new_ids.push(new_id);
                 self.doc.current_page_mut().shapes.push(s);
-                self.selected_shape_id = Some(new_id);
-                self.status_msg = "Komponentti monistettu.".to_string();
             }
+            let count = new_ids.len();
+            self.select_shapes(new_ids);
+            self.status_msg = if count == 1 {
+                "Komponentti monistettu.".to_string()
+            } else {
+                format!("{} komponenttia monistettu.", count)
+            };
         }
     }
 
@@ -425,10 +502,20 @@ impl eframe::App for PhotonVisionApp {
                     self.flip_selected(false);
                 }
                 if i.key_pressed(Key::Escape) {
-                    self.pending_stencil_id = None;
-                    self.wiring_from = None;
-                    self.creation_drag_start_mm = None;
-                    self.active_tool = ActiveTool::Select;
+                    if self.pending_stencil_id.is_some() || self.wiring_from.is_some() || self.creation_drag_start_mm.is_some() || self.active_tool != ActiveTool::Select {
+                        self.pending_stencil_id = None;
+                        self.wiring_from = None;
+                        self.creation_drag_start_mm = None;
+                        self.active_tool = ActiveTool::Select;
+                    } else {
+                        self.clear_selection();
+                    }
+                }
+                if i.modifiers.command && i.key_pressed(Key::A) {
+                    let all_ids: Vec<u64> = self.doc.current_page().shapes.iter().map(|s| s.id).collect();
+                    let count = all_ids.len();
+                    self.select_shapes(all_ids);
+                    self.status_msg = format!("Valittu kaikki {} komponenttia.", count);
                 }
                 if i.modifiers.command && i.key_pressed(Key::Z) {
                     if i.modifiers.shift {
@@ -441,22 +528,28 @@ impl eframe::App for PhotonVisionApp {
                     self.duplicate_selected();
                 }
                 if i.modifiers.command && i.key_pressed(Key::CloseBracket) {
-                    if let Some(sid) = self.selected_shape_id {
+                    let sids = self.selected_shape_ids();
+                    if !sids.is_empty() {
                         self.push_undo();
-                        if i.modifiers.shift {
-                            self.doc.current_page_mut().bring_to_front(sid);
-                        } else {
-                            self.doc.current_page_mut().bring_forward(sid);
+                        for sid in sids {
+                            if i.modifiers.shift {
+                                self.doc.current_page_mut().bring_to_front(sid);
+                            } else {
+                                self.doc.current_page_mut().bring_forward(sid);
+                            }
                         }
                     }
                 }
                 if i.modifiers.command && i.key_pressed(Key::OpenBracket) {
-                    if let Some(sid) = self.selected_shape_id {
+                    let sids = self.selected_shape_ids();
+                    if !sids.is_empty() {
                         self.push_undo();
-                        if i.modifiers.shift {
-                            self.doc.current_page_mut().send_to_back(sid);
-                        } else {
-                            self.doc.current_page_mut().send_backward(sid);
+                        for sid in sids {
+                            if i.modifiers.shift {
+                                self.doc.current_page_mut().send_to_back(sid);
+                            } else {
+                                self.doc.current_page_mut().send_backward(sid);
+                            }
                         }
                     }
                 }
@@ -837,7 +930,76 @@ impl PhotonVisionApp {
                     .map(|l| l.name.clone())
                     .collect();
 
-                if let Some(sid) = self.selected_shape_id {
+                let sel_ids = self.selected_shape_ids();
+                if sel_ids.len() > 1 {
+                    ui.label(
+                        egui::RichText::new(format!("Ryhmävalinta ({} kpl)", sel_ids.len()))
+                            .strong()
+                            .color(Color32::from_rgb(37, 99, 235)),
+                    );
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Monista").on_hover_text("Monista valitut (Cmd+D)").clicked() {
+                            self.duplicate_selected();
+                        }
+                        if ui.button("Poista").on_hover_text("Poista valitut (Delete)").clicked() {
+                            self.delete_selected();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("90°").on_hover_text("Kierrä 90° (R)").clicked() {
+                            self.rotate_selected(90.0);
+                        }
+                        if ui.button("↔ Peilaa").on_hover_text("Peilaa vaakasuunnassa (H)").clicked() {
+                            self.flip_selected(true);
+                        }
+                    });
+                    ui.add_space(8.0);
+                    ui.label("Aseta taso kaikille:");
+                    egui::ComboBox::from_id_salt("multi_shape_layer_combo")
+                        .selected_text("Valitse taso...")
+                        .show_ui(ui, |ui| {
+                            for ln in &layer_names {
+                                if ui.button(ln).clicked() {
+                                    self.push_undo();
+                                    let page = self.doc.current_page_mut();
+                                    for s in &mut page.shapes {
+                                        if sel_ids.contains(&s.id) {
+                                            s.layer = ln.clone();
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    ui.add_space(8.0);
+                    ui.label("Järjestys (Z-Order):");
+                    ui.horizontal(|ui| {
+                        if ui.small_button("▲▲ Ylimmäksi").clicked() {
+                            self.push_undo();
+                            for sid in &sel_ids {
+                                self.doc.current_page_mut().bring_to_front(*sid);
+                            }
+                        }
+                        if ui.small_button("▲ Eteen").clicked() {
+                            self.push_undo();
+                            for sid in &sel_ids {
+                                self.doc.current_page_mut().bring_forward(*sid);
+                            }
+                        }
+                        if ui.small_button("▼ Taakse").clicked() {
+                            self.push_undo();
+                            for sid in &sel_ids {
+                                self.doc.current_page_mut().send_backward(*sid);
+                            }
+                        }
+                        if ui.small_button("▼▼ Alimmaksi").clicked() {
+                            self.push_undo();
+                            for sid in &sel_ids {
+                                self.doc.current_page_mut().send_to_back(*sid);
+                            }
+                        }
+                    });
+                } else if let Some(sid) = self.selected_shape_id {
                     let mut z_action: Option<&'static str> = None;
                     {
                         let page = self.doc.current_page_mut();
@@ -1383,7 +1545,7 @@ impl PhotonVisionApp {
 
                 // Helper to render a shape and track port hovers
                 let mut render_shape = |shape: &DiagramShape| {
-                    let is_selected = self.selected_shape_id == Some(shape.id);
+                    let is_selected = self.is_shape_selected(shape.id);
                     self.draw_shape_on_canvas(&painter, origin, &page_snapshot, shape, is_selected);
 
                     let is_hovered = mouse_mm
@@ -1505,6 +1667,53 @@ impl PhotonVisionApp {
                     painter.line_segment(
                         [Pos2::new(paper_tl.x, sy), Pos2::new(paper_br.x, sy)],
                         Stroke::new(1.2_f32, Color32::from_rgb(6, 182, 212)),
+                    );
+                }
+
+                // Draw group bounding box around all selected shapes if multiple shapes are selected
+                let sel_ids = self.selected_shape_ids();
+                if sel_ids.len() > 1 {
+                    let mut min_x = f64::INFINITY;
+                    let mut max_x = f64::NEG_INFINITY;
+                    let mut min_y = f64::INFINITY;
+                    let mut max_y = f64::NEG_INFINITY;
+                    for s in &page_snapshot.shapes {
+                        if sel_ids.contains(&s.id) {
+                            let bb = s.bounding_box();
+                            min_x = min_x.min(bb.min_x);
+                            max_x = max_x.max(bb.max_x);
+                            min_y = min_y.min(bb.min_y);
+                            max_y = max_y.max(bb.max_y);
+                        }
+                    }
+                    if min_x.is_finite() && max_x > min_x {
+                        let p_min = self.page_to_screen(origin, Point::new(min_x, min_y));
+                        let p_max = self.page_to_screen(origin, Point::new(max_x, max_y));
+                        let group_rect = Rect::from_two_pos(p_min, p_max).expand(4.0);
+                        painter.rect_stroke(
+                            group_rect,
+                            CornerRadius::ZERO,
+                            Stroke::new(1.2_f32, Color32::from_rgb(59, 130, 246)),
+                            StrokeKind::Middle,
+                        );
+                    }
+                }
+
+                // Draw active rubber-band / marquee box selection
+                if let (Some(m_start), Some(m_cur)) = (self.marquee_drag_start_mm, self.marquee_current_mm) {
+                    let p1 = self.page_to_screen(origin, m_start);
+                    let p2 = self.page_to_screen(origin, m_cur);
+                    let m_rect = Rect::from_two_pos(p1, p2);
+                    painter.rect_filled(
+                        m_rect,
+                        CornerRadius::ZERO,
+                        Color32::from_rgba_unmultiplied(59, 130, 246, 35),
+                    );
+                    painter.rect_stroke(
+                        m_rect,
+                        CornerRadius::ZERO,
+                        Stroke::new(1.2_f32, Color32::from_rgb(59, 130, 246)),
+                        StrokeKind::Middle,
                     );
                 }
 
@@ -1739,10 +1948,11 @@ impl PhotonVisionApp {
         // Right-click: select shape at pointer before context menu opens
         if response.secondary_clicked() {
             if let Some(sh) = self.doc.current_page().find_shape_at(cur_mm, 1.5) {
-                self.selected_shape_id = Some(sh.id);
-                self.selected_connector_id = None;
+                if !self.is_shape_selected(sh.id) {
+                    self.select_single_shape(sh.id);
+                }
             } else {
-                self.selected_shape_id = None;
+                self.clear_selection();
             }
         }
 
@@ -1758,8 +1968,7 @@ impl PhotonVisionApp {
                     shape.height = 25.0;
                     shape.label.clear();
                     self.doc.current_page_mut().shapes.push(shape);
-                    self.selected_shape_id = Some(new_id);
-                    self.selected_connector_id = None;
+                    self.select_single_shape(new_id);
                     self.editing_shape_id = Some(new_id);
                     self.focus_text_edit = true;
                     self.active_tool = ActiveTool::Select;
@@ -1775,14 +1984,12 @@ impl PhotonVisionApp {
                 if let Some(st) = self.stencils.iter().find(|s| s.id == st_id) {
                     let shape = st.instantiate(new_id, snapped.x, snapped.y, count);
                     self.doc.current_page_mut().shapes.push(shape);
-                    self.selected_shape_id = Some(new_id);
-                    self.selected_connector_id = None;
+                    self.select_single_shape(new_id);
                 } else if let Some(shape) =
                     instantiate_shape(&st_id, new_id, snapped.x, snapped.y, count)
                 {
                     self.doc.current_page_mut().shapes.push(shape);
-                    self.selected_shape_id = Some(new_id);
-                    self.selected_connector_id = None;
+                    self.select_single_shape(new_id);
                 }
                 // Keep stencil armed only if Shift is held; otherwise return to Select tool
                 if !response.ctx.input(|i| i.modifiers.shift) {
@@ -1820,24 +2027,26 @@ impl PhotonVisionApp {
                 return;
             }
 
-            // Check if dragging a resize handle of the currently selected shape
-            if let Some(sel_id) = self.selected_shape_id {
-                if let Some(sel_shape) = self
-                    .doc
-                    .current_page()
-                    .shapes
-                    .iter()
-                    .find(|s| s.id == sel_id)
-                    .cloned()
-                {
-                    if let Some(handle) = hit_test_resize_handle(&sel_shape, cur_mm, 3.0) {
-                        self.push_undo();
-                        self.active_resize_handle = Some(handle);
-                        self.dragging_shape_id = Some(sel_id);
-                        self.drag_start_mouse_mm = cur_mm;
-                        self.drag_start_shape_pos = Point::new(sel_shape.x, sel_shape.y);
-                        self.drag_start_shape_size = (sel_shape.width, sel_shape.height);
-                        return;
+            // Check if dragging a resize handle of the currently selected shape (only when 1 shape selected)
+            if self.selected_shape_ids.len() <= 1 {
+                if let Some(sel_id) = self.selected_shape_id {
+                    if let Some(sel_shape) = self
+                        .doc
+                        .current_page()
+                        .shapes
+                        .iter()
+                        .find(|s| s.id == sel_id)
+                        .cloned()
+                    {
+                        if let Some(handle) = hit_test_resize_handle(&sel_shape, cur_mm, 3.0) {
+                            self.push_undo();
+                            self.active_resize_handle = Some(handle);
+                            self.dragging_shape_id = Some(sel_id);
+                            self.drag_start_mouse_mm = cur_mm;
+                            self.drag_start_shape_pos = Point::new(sel_shape.x, sel_shape.y);
+                            self.drag_start_shape_size = (sel_shape.width, sel_shape.height);
+                            return;
+                        }
                     }
                 }
             }
@@ -1847,19 +2056,44 @@ impl PhotonVisionApp {
 
             if let Some(sh) = hit_shape {
                 self.push_undo();
-                self.selected_shape_id = Some(sh.id);
+                let is_modifier = response.ctx.input(|i| i.modifiers.shift || i.modifiers.command);
+                if self.is_shape_selected(sh.id) {
+                    // Already in selection -> keep group selection intact for dragging as a group!
+                } else if is_modifier {
+                    self.toggle_shape_selection(sh.id);
+                } else {
+                    self.select_single_shape(sh.id);
+                }
+
                 self.selected_connector_id = None;
                 self.dragging_shape_id = Some(sh.id);
                 self.active_resize_handle = None;
                 self.drag_start_mouse_mm = cur_mm;
                 self.drag_start_shape_pos = Point::new(sh.x, sh.y);
                 self.drag_start_shape_size = (sh.width, sh.height);
+
+                let sids = self.selected_shape_ids();
+                self.drag_start_group_positions = self.doc.current_page().shapes
+                    .iter()
+                    .filter(|s| sids.contains(&s.id))
+                    .map(|s| (s.id, Point::new(s.x, s.y)))
+                    .collect();
+            } else if self.active_tool == ActiveTool::Select {
+                // Dragging on empty canvas with Select tool starts rubber-band marquee selection!
+                let is_modifier = response.ctx.input(|i| i.modifiers.shift || i.modifiers.command);
+                if !is_modifier {
+                    self.clear_selection();
+                }
+                self.marquee_drag_start_mm = Some(cur_mm);
+                self.marquee_current_mm = Some(cur_mm);
             }
         }
 
-        // 4. Ongoing drag (moving or resizing shape)
+        // 4. Ongoing drag (moving shapes as group, resizing shape, or rubber-band selection)
         if response.dragged() {
-            if let Some(sid) = self.dragging_shape_id {
+            if self.marquee_drag_start_mm.is_some() {
+                self.marquee_current_mm = Some(cur_mm);
+            } else if let Some(sid) = self.dragging_shape_id {
                 let dx = cur_mm.x - self.drag_start_mouse_mm.x;
                 let dy = cur_mm.y - self.drag_start_mouse_mm.y;
 
@@ -1892,35 +2126,26 @@ impl PhotonVisionApp {
                     }
                     update_all_connectors(&mut page.connectors, &page.shapes);
                 } else {
-                    let mut target = self.snap_point(Point::new(
-                        self.drag_start_shape_pos.x + dx,
-                        self.drag_start_shape_pos.y + dy,
-                    ));
-
-                    // Smart Alignment Guides against other shapes
-                    let mut guide_x = None;
-                    let mut guide_y = None;
-                    if self.doc.snap_to_shapes {
-                        for other in &self.doc.current_page().shapes {
-                            if other.id == sid {
-                                continue;
-                            }
-                            if (other.x - target.x).abs() < 2.2 {
-                                target.x = other.x;
-                                guide_x = Some(other.x);
-                            }
-                            if (other.y - target.y).abs() < 2.2 {
-                                target.y = other.y;
-                                guide_y = Some(other.y);
-                            }
-                        }
-                    }
-                    self.smart_guides = (guide_x, guide_y);
+                    // Move the entire selected group together!
+                    let snapped_dx = if self.doc.snap_to_grid {
+                        let step = (self.doc.current_page().grid_spacing_mm * 0.5).max(1.0);
+                        (dx / step).round() * step
+                    } else {
+                        dx
+                    };
+                    let snapped_dy = if self.doc.snap_to_grid {
+                        let step = (self.doc.current_page().grid_spacing_mm * 0.5).max(1.0);
+                        (dy / step).round() * step
+                    } else {
+                        dy
+                    };
 
                     let page = self.doc.current_page_mut();
-                    if let Some(s) = page.shapes.iter_mut().find(|s| s.id == sid) {
-                        s.x = target.x;
-                        s.y = target.y;
+                    for (gsid, orig_pos) in &self.drag_start_group_positions {
+                        if let Some(s) = page.shapes.iter_mut().find(|s| s.id == *gsid) {
+                            s.x = orig_pos.x + snapped_dx;
+                            s.y = orig_pos.y + snapped_dy;
+                        }
                     }
                     update_all_connectors(&mut page.connectors, &page.shapes);
                 }
@@ -1929,7 +2154,43 @@ impl PhotonVisionApp {
 
         // 5. End of drag
         if response.drag_stopped() {
+            // Finish rubber-band / marquee box selection
+            if let Some(start_mm) = self.marquee_drag_start_mm.take() {
+                self.marquee_current_mm = None;
+                let end_mm = cur_mm;
+                let min_x = start_mm.x.min(end_mm.x);
+                let max_x = start_mm.x.max(end_mm.x);
+                let min_y = start_mm.y.min(end_mm.y);
+                let max_y = start_mm.y.max(end_mm.y);
+
+                if (max_x - min_x) > 1.2 || (max_y - min_y) > 1.2 {
+                    let page = self.doc.current_page();
+                    let mut hit_ids = Vec::new();
+                    for shape in &page.shapes {
+                        let bb = shape.bounding_box();
+                        if bb.max_x >= min_x && bb.min_x <= max_x && bb.max_y >= min_y && bb.min_y <= max_y {
+                            hit_ids.push(shape.id);
+                        }
+                    }
+                    let is_modifier = response.ctx.input(|i| i.modifiers.shift || i.modifiers.command);
+                    if is_modifier {
+                        for id in hit_ids {
+                            if !self.selected_shape_ids.contains(&id) {
+                                self.selected_shape_ids.push(id);
+                            }
+                        }
+                        self.selected_shape_id = self.selected_shape_ids.last().copied();
+                    } else {
+                        self.select_shapes(hit_ids);
+                    }
+                    if !self.selected_shape_ids.is_empty() {
+                        self.status_msg = format!("Valittu {} komponenttia.", self.selected_shape_ids.len());
+                    }
+                }
+            }
+
             self.dragging_shape_id = None;
+            self.drag_start_group_positions.clear();
             self.active_resize_handle = None;
             self.smart_guides = (None, None);
 
@@ -2024,7 +2285,7 @@ impl PhotonVisionApp {
                             sh.height = h.max(4.0);
                         }
                         self.doc.current_page_mut().shapes.push(sh);
-                        self.selected_shape_id = Some(id);
+                        self.select_single_shape(id);
                         self.active_tool = ActiveTool::Select;
                     }
                 }
@@ -2033,11 +2294,10 @@ impl PhotonVisionApp {
 
         // Double-click to directly edit text inside a shape
         if response.double_clicked() && self.pending_stencil_id.is_none() {
-            let page = self.doc.current_page();
-            if let Some(s) = page.find_shape_at(cur_mm, 1.5) {
-                self.selected_shape_id = Some(s.id);
-                self.selected_connector_id = None;
-                self.editing_shape_id = Some(s.id);
+            let hit_id = self.doc.current_page().find_shape_at(cur_mm, 1.5).map(|s| s.id);
+            if let Some(id) = hit_id {
+                self.select_single_shape(id);
+                self.editing_shape_id = Some(id);
                 self.focus_text_edit = true;
                 return;
             }
@@ -2049,28 +2309,35 @@ impl PhotonVisionApp {
                 self.editing_shape_id = None;
                 self.focus_text_edit = false;
             }
-            let page = self.doc.current_page();
+            let is_modifier = response.ctx.input(|i| i.modifiers.shift || i.modifiers.command);
 
             // Hit-test shapes respecting layer z-order first (so text boxes / shapes above wires get clicked)
-            if let Some(s) = page.find_shape_at(cur_mm, 1.5) {
-                self.selected_shape_id = Some(s.id);
-                self.selected_connector_id = None;
+            let hit_shape_id = self.doc.current_page().find_shape_at(cur_mm, 1.5).map(|s| s.id);
+            if let Some(id) = hit_shape_id {
+                if is_modifier {
+                    self.toggle_shape_selection(id);
+                } else {
+                    self.select_single_shape(id);
+                }
                 return;
             }
 
             // Hit-test connectors if no shape was clicked
-            if let Some(conn) = page
+            let hit_conn_id = self.doc.current_page()
                 .connectors
                 .iter()
                 .find(|c| connector_hit_test(c, cur_mm, 2.5))
-            {
-                self.selected_connector_id = Some(conn.id);
-                self.selected_shape_id = None;
+                .map(|c| c.id);
+
+            if let Some(cid) = hit_conn_id {
+                self.clear_selection();
+                self.selected_connector_id = Some(cid);
                 return;
             }
 
-            self.selected_shape_id = None;
-            self.selected_connector_id = None;
+            if !is_modifier {
+                self.clear_selection();
+            }
         }
 
         let _ = origin;
@@ -2380,16 +2647,19 @@ impl PhotonVisionApp {
                 StrokeKind::Middle,
             );
 
-            for (_, hpt) in resize_handle_points(shape) {
-                let hp = self.page_to_screen(origin, hpt);
-                let hrect = Rect::from_center_size(hp, Vec2::splat(6.5));
-                painter.rect_filled(hrect, CornerRadius::ZERO, Color32::WHITE);
-                painter.rect_stroke(
-                    hrect,
-                    CornerRadius::ZERO,
-                    Stroke::new(1.5_f32, sel_col),
-                    StrokeKind::Middle,
-                );
+            // Only draw individual resize handles when exactly one shape is selected
+            if self.selected_shape_ids.len() <= 1 {
+                for (_, hpt) in resize_handle_points(shape) {
+                    let hp = self.page_to_screen(origin, hpt);
+                    let hrect = Rect::from_center_size(hp, Vec2::splat(6.5));
+                    painter.rect_filled(hrect, CornerRadius::ZERO, Color32::WHITE);
+                    painter.rect_stroke(
+                        hrect,
+                        CornerRadius::ZERO,
+                        Stroke::new(1.5_f32, sel_col),
+                        StrokeKind::Middle,
+                    );
+                }
             }
         }
     }
