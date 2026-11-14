@@ -1090,13 +1090,26 @@ impl PhotonVisionApp {
                         let is_selected = self.selected_shape_id == Some(shape.id);
                         self.draw_shape_on_canvas(&painter, origin, &page_snapshot, shape, is_selected);
 
-                        // Draw connection ports & detect port hover
-                        if self.doc.show_connection_points || self.active_tool == ActiveTool::Wire {
+                        // Draw connection ports dynamically:
+                        // Show ports only when the shape is selected, hovered, or when drawing wires nearby.
+                        let is_hovered = mouse_mm
+                            .map(|m| shape.contains_point(m, 1.5))
+                            .unwrap_or(false);
+                        let is_near_shape = mouse_mm
+                            .map(|m| shape.contains_point(m, 12.0))
+                            .unwrap_or(false);
+
+                        let show_ports = is_selected
+                            || is_hovered
+                            || (self.active_tool == ActiveTool::Wire && is_near_shape)
+                            || (self.wiring_from.is_some() && is_near_shape);
+
+                        if show_ports {
                             for (p_idx, _port) in shape.ports.iter().enumerate() {
                                 let (p_world, _) = shape.port_world_pos_and_dir(p_idx);
                                 let sp = self.page_to_screen(origin, p_world);
                                 let is_near = mouse_mm
-                                    .map(|m| m.distance_to(p_world) <= 3.2)
+                                    .map(|m| m.distance_to(p_world) <= 3.5)
                                     .unwrap_or(false);
                                 if is_near {
                                     hovered_port = Some((shape.id, p_idx, p_world));
