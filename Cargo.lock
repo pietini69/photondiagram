@@ -2490,6 +2490,7 @@ dependencies = [
  "env_logger",
  "log",
  "miniz_oxide 0.8.9",
+ "pollster",
  "rfd",
  "roxmltree",
  "serde",

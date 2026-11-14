@@ -36,6 +36,13 @@ enum ResizeHandle {
     Bottom,
 }
 
+pub enum FileAction {
+    OpenDocument(PathBuf),
+    SaveDocument(PathBuf),
+    ImportVssx(Vec<PathBuf>),
+    SetStatus(String),
+}
+
 pub struct PhotonVisionApp {
     pub doc: DiagramDocument,
     pub stencils: Vec<StencilItem>,
@@ -46,6 +53,10 @@ pub struct PhotonVisionApp {
     pub selected_connector_id: Option<u64>,
     pub current_file: Option<PathBuf>,
     pub status_msg: String,
+
+    // Thread-safe asynchronous file dialog channel
+    file_action_tx: std::sync::mpsc::Sender<FileAction>,
+    file_action_rx: std::sync::mpsc::Receiver<FileAction>,
 
     // Canvas viewport state (zoom in pixels per paper mm, pan offset in screen pixels)
     pub zoom_px_per_mm: f32,
@@ -74,6 +85,7 @@ pub struct PhotonVisionApp {
 
 impl Default for PhotonVisionApp {
     fn default() -> Self {
+        let (file_action_tx, file_action_rx) = std::sync::mpsc::channel();
         let mut doc = template_electrical_schematic();
         // Add the floor plan as Page 2 right out of the box so the user can explore both immediately!
         let floor_doc = template_floorplan_and_sfs_elec();
@@ -106,6 +118,8 @@ impl Default for PhotonVisionApp {
             selected_connector_id: None,
             current_file: None,
             status_msg: "Valmis — Valitse vasemmalta symboli tai vedä vihreästä liitospisteestä johdin. Sivu 1: Sähkökaavio, Sivu 2: Pohjapiirustus 1:50.".to_string(),
+            file_action_tx,
+            file_action_rx,
             zoom_px_per_mm: 3.4,
             pan_offset: Vec2::new(42.0, 36.0),
             dragging_shape_id: None,
@@ -241,88 +255,145 @@ impl PhotonVisionApp {
         }
     }
 
-    fn open_file_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter(
-                "Tuetut kaaviot & projektit (.vsdx, .vdx, .vsd, .lbrn2, .pvis)",
-                &["vsdx", "vdx", "vsd", "lbrn2", "lbrn", "pvis", "json"],
-            )
-            .add_filter("PhotonCAM / LightBurn (.lbrn2)", &["lbrn2", "lbrn"])
-            .add_filter("Microsoft Visio (.vsdx, .vdx, .vsd)", &["vsdx", "vdx", "vsd"])
-            .add_filter("PhotonVision (.pvis)", &["pvis"])
-            .pick_file()
-        {
-            match load_document_from_path(&path) {
-                Ok(doc) => {
-                    self.push_undo();
-                    self.doc = doc;
-                    self.current_file = Some(path.clone());
-                    self.selected_shape_id = None;
-                    self.selected_connector_id = None;
-                    self.status_msg = format!("Avattu tiedosto: {}", path.display());
+    fn open_file_dialog(&self, ctx: &egui::Context) {
+        let tx = self.file_action_tx.clone();
+        let ctx = ctx.clone();
+
+        std::thread::spawn(move || {
+            pollster::block_on(async move {
+                if let Some(handle) = rfd::AsyncFileDialog::new()
+                    .add_filter(
+                        "Tuetut kaaviot & projektit (.vsdx, .vdx, .vsd, .lbrn2, .pvis)",
+                        &["vsdx", "vdx", "vsd", "lbrn2", "lbrn", "pvis", "json"],
+                    )
+                    .add_filter("PhotonCAM / LightBurn (.lbrn2)", &["lbrn2", "lbrn"])
+                    .add_filter("Microsoft Visio (.vsdx, .vdx, .vsd)", &["vsdx", "vdx", "vsd"])
+                    .add_filter("PhotonVision (.pvis)", &["pvis"])
+                    .pick_file()
+                    .await
+                {
+                    let path = handle.path().to_path_buf();
+                    let _ = tx.send(FileAction::OpenDocument(path));
+                    ctx.request_repaint();
                 }
-                Err(e) => {
-                    self.status_msg = format!("Virhe avattaessa: {}", e);
-                }
-            }
-        }
+            });
+        });
     }
 
-    fn import_vssx_dialog(&mut self) {
-        if let Some(paths) = rfd::FileDialog::new()
-            .add_filter("Visio Stencil Library (.vssx)", &["vssx", "vsdx"])
-            .pick_files()
-        {
-            let mut total = 0;
-            let mut names = Vec::new();
-            for path in paths {
-                match load_stencil_library(&path) {
-                    Ok(items) => {
-                        let count = items.len();
-                        total += count;
-                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            names.push(stem.to_string());
-                        }
-                        self.stencils.extend(items);
-                    }
-                    Err(e) => {
-                        self.status_msg = format!("VSSX-tuontivirhe ({}): {}", path.display(), e);
-                    }
+    fn import_vssx_dialog(&self, ctx: &egui::Context) {
+        let tx = self.file_action_tx.clone();
+        let ctx = ctx.clone();
+
+        std::thread::spawn(move || {
+            pollster::block_on(async move {
+                if let Some(handles) = rfd::AsyncFileDialog::new()
+                    .add_filter("Visio Stencil Library (.vssx, .vsdx)", &["vssx", "vsdx"])
+                    .pick_files()
+                    .await
+                {
+                    let paths: Vec<PathBuf> =
+                        handles.into_iter().map(|h| h.path().to_path_buf()).collect();
+                    let _ = tx.send(FileAction::ImportVssx(paths));
+                    ctx.request_repaint();
                 }
-            }
-            if total > 0 {
-                self.status_msg = format!(
-                    "Tuotu yhteensä {} Visio-symbolia kirjastoista: {}!",
-                    total,
-                    names.join(", ")
-                );
-            }
-        }
+            });
+        });
     }
 
-    fn save_file_as_dialog(&mut self, default_ext: &str, filter_label: &str) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter(filter_label, &[default_ext])
-            .set_file_name(format!("kaavio.{}", default_ext))
-            .save_file()
-        {
-            match save_document_to_path(&self.doc, &path) {
-                Ok(()) => {
-                    if default_ext == "pvis" || default_ext == "vsdx" {
-                        self.current_file = Some(path.clone());
-                    }
-                    self.status_msg = format!("Tallennettu: {}", path.display());
+    fn save_file_as_dialog(&self, default_ext: &str, filter_label: &str, ctx: &egui::Context) {
+        let tx = self.file_action_tx.clone();
+        let ctx = ctx.clone();
+        let ext = default_ext.to_string();
+        let label = filter_label.to_string();
+        let default_name = if let Some(ref cf) = self.current_file {
+            let stem = cf.file_stem().and_then(|s| s.to_str()).unwrap_or("kaavio");
+            format!("{}.{}", stem, ext)
+        } else {
+            format!("kaavio.{}", ext)
+        };
+
+        std::thread::spawn(move || {
+            pollster::block_on(async move {
+                let ext_lower = ext.to_lowercase();
+                let ext_upper = ext.to_uppercase();
+                let extensions = [ext_lower.as_str(), ext_upper.as_str()];
+                if let Some(handle) = rfd::AsyncFileDialog::new()
+                    .add_filter(&label, &extensions)
+                    .set_file_name(&default_name)
+                    .save_file()
+                    .await
+                {
+                    let path = handle.path().to_path_buf();
+                    let _ = tx.send(FileAction::SaveDocument(path));
+                    ctx.request_repaint();
                 }
-                Err(e) => {
-                    self.status_msg = format!("Tallennusvirhe: {}", e);
-                }
-            }
-        }
+            });
+        });
     }
 }
 
 impl eframe::App for PhotonVisionApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Process asynchronous file dialog actions
+        while let Ok(action) = self.file_action_rx.try_recv() {
+            match action {
+                FileAction::OpenDocument(path) => match load_document_from_path(&path) {
+                    Ok(doc) => {
+                        self.push_undo();
+                        self.doc = doc;
+                        self.current_file = Some(path.clone());
+                        self.selected_shape_id = None;
+                        self.selected_connector_id = None;
+                        self.status_msg = format!("Avattu tiedosto: {}", path.display());
+                    }
+                    Err(e) => {
+                        self.status_msg = format!("Virhe avattaessa: {}", e);
+                    }
+                },
+                FileAction::SaveDocument(path) => match save_document_to_path(&self.doc, &path) {
+                    Ok(()) => {
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        if ext == "pvis" || ext == "vsdx" {
+                            self.current_file = Some(path.clone());
+                        }
+                        self.status_msg = format!("Tallennettu: {}", path.display());
+                    }
+                    Err(e) => {
+                        self.status_msg = format!("Tallennusvirhe: {}", e);
+                    }
+                },
+                FileAction::ImportVssx(paths) => {
+                    let mut total = 0;
+                    let mut names = Vec::new();
+                    for path in paths {
+                        match load_stencil_library(&path) {
+                            Ok(items) => {
+                                let count = items.len();
+                                total += count;
+                                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                                    names.push(stem.to_string());
+                                }
+                                self.stencils.extend(items);
+                            }
+                            Err(e) => {
+                                self.status_msg =
+                                    format!("VSSX-tuontivirhe ({}): {}", path.display(), e);
+                            }
+                        }
+                    }
+                    if total > 0 {
+                        self.status_msg = format!(
+                            "Tuotu yhteensä {} Visio-symbolia kirjastoista: {}!",
+                            total,
+                            names.join(", ")
+                        );
+                    }
+                }
+                FileAction::SetStatus(msg) => {
+                    self.status_msg = msg;
+                }
+            }
+        }
         // Keyboard shortcuts
         if !ctx.wants_keyboard_input() {
             ctx.input(|i| {
@@ -384,50 +455,50 @@ impl PhotonVisionApp {
                         .clicked()
                     {
                         ui.close_menu();
-                        self.open_file_dialog();
+                        self.open_file_dialog(ui.ctx());
                     }
                     if ui
                         .button("📦 Tuo Visio-symbolikirjasto (.vssx)...")
                         .clicked()
                     {
                         ui.close_menu();
-                        self.import_vssx_dialog();
+                        self.import_vssx_dialog(ui.ctx());
                     }
                     ui.separator();
                     if ui.button("💾 Tallenna PhotonVision (.pvis)...").clicked() {
                         ui.close_menu();
-                        self.save_file_as_dialog("pvis", "PhotonVision (.pvis)");
+                        self.save_file_as_dialog("pvis", "PhotonVision (.pvis)", ui.ctx());
                     }
                     if ui
                         .button("📘 Tallenna Microsoft Visio (.vsdx)...")
                         .clicked()
                     {
                         ui.close_menu();
-                        self.save_file_as_dialog("vsdx", "Microsoft Visio 2013+ (.vsdx)");
+                        self.save_file_as_dialog("vsdx", "Microsoft Visio 2013+ (.vsdx)", ui.ctx());
                     }
                     if ui.button("📗 Tallenna Visio XML (.vdx)...").clicked() {
                         ui.close_menu();
-                        self.save_file_as_dialog("vdx", "Visio XML Drawing (.vdx)");
+                        self.save_file_as_dialog("vdx", "Visio XML Drawing (.vdx)", ui.ctx());
                     }
                     ui.separator();
                     if ui.button("🔥 Vie PhotonCAM / LightBurn (.lbrn2)...").clicked() {
                         ui.close_menu();
-                        self.save_file_as_dialog("lbrn2", "PhotonCAM / LightBurn Laser Project (.lbrn2)");
+                        self.save_file_as_dialog("lbrn2", "PhotonCAM / LightBurn Laser Project (.lbrn2)", ui.ctx());
                     }
                     if ui.button("🖼️ Vie SVG-vektorikuva (.svg)...").clicked() {
                         ui.close_menu();
-                        self.save_file_as_dialog("svg", "SVG Vector Graphics (.svg)");
+                        self.save_file_as_dialog("svg", "SVG Vector Graphics (.svg)", ui.ctx());
                     }
                     if ui.button("📐 Vie AutoCAD DXF (.dxf)...").clicked() {
                         ui.close_menu();
-                        self.save_file_as_dialog("dxf", "AutoCAD DXF (.dxf)");
+                        self.save_file_as_dialog("dxf", "AutoCAD DXF (.dxf)", ui.ctx());
                     }
                     if ui
                         .button("📋 Vie Osaluettelo / Huoneet (.csv)...")
                         .clicked()
                     {
                         ui.close_menu();
-                        self.save_file_as_dialog("csv", "Osaluettelo BOM (.csv)");
+                        self.save_file_as_dialog("csv", "Osaluettelo BOM (.csv)", ui.ctx());
                     }
                 });
 
