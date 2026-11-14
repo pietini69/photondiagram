@@ -144,7 +144,15 @@ impl Default for PhotonVisionApp {
 }
 
 impl PhotonVisionApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut fonts = egui::FontDefinitions::default();
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .push("Hack-Regular".to_owned());
+        cc.egui_ctx.set_fonts(fonts);
+
         Self::default()
     }
 
@@ -469,8 +477,8 @@ impl PhotonVisionApp {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // 1. Menu bar
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("📁 Tiedosto", |ui| {
-                    if ui.button("📄 Uusi tyhjä kaavio").clicked() {
+                ui.menu_button("Tiedosto", |ui| {
+                    if ui.button("Uusi tyhjä kaavio").clicked() {
                         self.push_undo();
                         self.doc = DiagramDocument::default();
                         self.selected_shape_id = None;
@@ -479,50 +487,50 @@ impl PhotonVisionApp {
                     }
                     ui.separator();
                     if ui
-                        .button("📂 Avaa (.vsdx, .vdx, .vsd, .lbrn2, .pvis)...")
+                        .button("Avaa (.vsdx, .vdx, .vsd, .lbrn2, .pvis)...")
                         .clicked()
                     {
                         ui.close_menu();
                         self.open_file_dialog(ui.ctx());
                     }
                     if ui
-                        .button("📦 Tuo Visio-symbolikirjasto (.vssx)...")
+                        .button("Tuo Visio-symbolikirjasto (.vssx)...")
                         .clicked()
                     {
                         ui.close_menu();
                         self.import_vssx_dialog(ui.ctx());
                     }
                     ui.separator();
-                    if ui.button("💾 Tallenna PhotonVision (.pvis)...").clicked() {
+                    if ui.button("Tallenna PhotonVision (.pvis)...").clicked() {
                         ui.close_menu();
                         self.save_file_as_dialog("pvis", "PhotonVision (.pvis)", ui.ctx());
                     }
                     if ui
-                        .button("📘 Tallenna Microsoft Visio (.vsdx)...")
+                        .button("Tallenna Microsoft Visio (.vsdx)...")
                         .clicked()
                     {
                         ui.close_menu();
                         self.save_file_as_dialog("vsdx", "Microsoft Visio 2013+ (.vsdx)", ui.ctx());
                     }
-                    if ui.button("📗 Tallenna Visio XML (.vdx)...").clicked() {
+                    if ui.button("Tallenna Visio XML (.vdx)...").clicked() {
                         ui.close_menu();
                         self.save_file_as_dialog("vdx", "Visio XML Drawing (.vdx)", ui.ctx());
                     }
                     ui.separator();
-                    if ui.button("🔥 Vie PhotonCAM / LightBurn (.lbrn2)...").clicked() {
+                    if ui.button("Vie PhotonCAM / LightBurn (.lbrn2)...").clicked() {
                         ui.close_menu();
                         self.save_file_as_dialog("lbrn2", "PhotonCAM / LightBurn Laser Project (.lbrn2)", ui.ctx());
                     }
-                    if ui.button("🖼️ Vie SVG-vektorikuva (.svg)...").clicked() {
+                    if ui.button("Vie SVG-vektorikuva (.svg)...").clicked() {
                         ui.close_menu();
                         self.save_file_as_dialog("svg", "SVG Vector Graphics (.svg)", ui.ctx());
                     }
-                    if ui.button("📐 Vie AutoCAD DXF (.dxf)...").clicked() {
+                    if ui.button("Vie AutoCAD DXF (.dxf)...").clicked() {
                         ui.close_menu();
                         self.save_file_as_dialog("dxf", "AutoCAD DXF (.dxf)", ui.ctx());
                     }
                     if ui
-                        .button("📋 Vie Osaluettelo / Huoneet (.csv)...")
+                        .button("Vie Osaluettelo / Huoneet (.csv)...")
                         .clicked()
                     {
                         ui.close_menu();
@@ -530,9 +538,9 @@ impl PhotonVisionApp {
                     }
                 });
 
-                ui.menu_button("📐 Valmiit mallipohjat", |ui| {
+                ui.menu_button("Valmiit mallipohjat", |ui| {
                     if ui
-                        .button("⚡ Sähkö- & Ohjauskytkentäkaavio (IEC / PLC)")
+                        .button("Sähkö- & Ohjauskytkentäkaavio (IEC / PLC)")
                         .clicked()
                     {
                         self.push_undo();
@@ -544,7 +552,7 @@ impl PhotonVisionApp {
                         ui.close_menu();
                     }
                     if ui
-                        .button("🏠 Omakotitalon pohjapiirustus + SFS-sähkösuunnitelma (1:50)")
+                        .button("Omakotitalon pohjapiirustus + SFS-sähkösuunnitelma (1:50)")
                         .clicked()
                     {
                         self.push_undo();
@@ -558,7 +566,7 @@ impl PhotonVisionApp {
                     }
                 });
 
-                ui.menu_button("✏️ Muokkaa", |ui| {
+                ui.menu_button("Muokkaa", |ui| {
                     if ui.button("↩ Kumoa (Cmd+Z)").clicked() {
                         self.undo();
                         ui.close_menu();
@@ -568,11 +576,11 @@ impl PhotonVisionApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("📋 Monista valittu (Cmd+D)").clicked() {
+                    if ui.button("Monista valittu (Cmd+D)").clicked() {
                         self.duplicate_selected();
                         ui.close_menu();
                     }
-                    if ui.button("🔄 Kierrä 90° (R)").clicked() {
+                    if ui.button("Kierrä 90° (R)").clicked() {
                         self.rotate_selected(90.0);
                         ui.close_menu();
                     }
@@ -585,7 +593,7 @@ impl PhotonVisionApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("🗑 Poista valittu (Backspace)").clicked() {
+                    if ui.button("Poista valittu (Backspace)").clicked() {
                         self.delete_selected();
                         ui.close_menu();
                     }
@@ -599,12 +607,12 @@ impl PhotonVisionApp {
                 ui.label(egui::RichText::new("Työkalu:").strong());
                 for (tool, label) in [
                     (ActiveTool::Select, "↖ Valitse"),
-                    (ActiveTool::Wire, "🔌 Johdin"),
-                    (ActiveTool::DrawText, "🔤 Teksti"),
-                    (ActiveTool::DrawWall, "🧱 Seinä"),
-                    (ActiveTool::DrawRoom, "🏠 Huone (m²)"),
-                    (ActiveTool::DrawDimension, "📏 Mittaviiva"),
-                    (ActiveTool::Pan, "✋ Vieritä"),
+                    (ActiveTool::Wire, "Johdin"),
+                    (ActiveTool::DrawText, "Teksti"),
+                    (ActiveTool::DrawWall, "Seinä"),
+                    (ActiveTool::DrawRoom, "Huone (m²)"),
+                    (ActiveTool::DrawDimension, "Mittaviiva"),
+                    (ActiveTool::Pan, "Vieritä"),
                 ] {
                     if ui
                         .selectable_label(
@@ -622,21 +630,21 @@ impl PhotonVisionApp {
                 ui.separator();
 
                 // Quick actions on selection
-                if ui.button("🔄 90°").on_hover_text("Kierrä 90° (R)").clicked() {
+                if ui.button("90°").on_hover_text("Kierrä 90° (R)").clicked() {
                     self.rotate_selected(90.0);
                 }
                 if ui.button("↔ Peilaa").on_hover_text("Peilaa (H)").clicked() {
                     self.flip_selected(true);
                 }
                 if ui
-                    .button("📋 Monista")
+                    .button("Monista")
                     .on_hover_text("Monista valittu (Cmd+D)")
                     .clicked()
                 {
                     self.duplicate_selected();
                 }
                 if ui
-                    .button("🗑 Poista")
+                    .button("Poista")
                     .on_hover_text("Poista valittu (Delete)")
                     .clicked()
                 {
@@ -674,7 +682,7 @@ impl PhotonVisionApp {
 
                 ui.separator();
                 ui.checkbox(&mut self.doc.snap_to_grid, "Tartu ruudukkoon");
-                ui.checkbox(&mut self.doc.show_line_jumps, "Johdinhypyt ⌒");
+                ui.checkbox(&mut self.doc.show_line_jumps, "Johdinhypyt (sillat)");
             });
         });
     }
@@ -699,7 +707,7 @@ impl PhotonVisionApp {
                     self.selected_connector_id = None;
                 }
 
-                if ui.small_button("➕ Uusi sivu").clicked() {
+                if ui.small_button("+ Uusi sivu").clicked() {
                     let n = self.doc.pages.len() + 1;
                     let mut p = DiagramPage::default();
                     p.name = format!("Sivu {}", n);
@@ -709,11 +717,11 @@ impl PhotonVisionApp {
 
                 ui.separator();
                 ui.label("Zoom:");
-                if ui.small_button("➖").clicked() {
+                if ui.small_button("-").clicked() {
                     self.zoom_px_per_mm = (self.zoom_px_per_mm * 0.85).clamp(0.8, 15.0);
                 }
                 ui.label(format!("{:.0}%", (self.zoom_px_per_mm / 3.4) * 100.0));
-                if ui.small_button("➕").clicked() {
+                if ui.small_button("+").clicked() {
                     self.zoom_px_per_mm = (self.zoom_px_per_mm * 1.18).clamp(0.8, 15.0);
                 }
                 if ui.small_button("Sopiva").clicked() {
@@ -732,12 +740,12 @@ impl PhotonVisionApp {
             .default_width(250.0)
             .resizable(true)
             .show(ctx, |ui| {
-                ui.heading("📚 Symbolikirjasto");
+                ui.heading("Symbolikirjasto");
                 ui.horizontal(|ui| {
-                    ui.label("🔍");
+                    ui.label("Etsi:");
                     ui.text_edit_singleline(&mut self.stencil_search)
                         .on_hover_text("Hae esim. vastus, rele, pistorasia, ovi, kiuas...");
-                    if !self.stencil_search.is_empty() && ui.small_button("✖").clicked() {
+                    if !self.stencil_search.is_empty() && ui.small_button("×").clicked() {
                         self.stencil_search.clear();
                     }
                 });
@@ -817,7 +825,7 @@ impl PhotonVisionApp {
             .default_width(275.0)
             .resizable(true)
             .show(ctx, |ui| {
-                ui.heading("⚙️ Ominaisuudet");
+                ui.heading("Ominaisuudet");
                 ui.separator();
 
                 let scale = self.doc.current_page().scale;
@@ -1032,28 +1040,28 @@ impl PhotonVisionApp {
                                 ui.label("Järjestys (Z-Order):");
                                 ui.horizontal(|ui| {
                                     if ui
-                                        .small_button("⏫ Ylimmäksi")
+                                        .small_button("▲▲ Ylimmäksi")
                                         .on_hover_text("Tuo etualalle (Bring to Front) • Cmd+Shift+]")
                                         .clicked()
                                     {
                                         z_action = Some("front");
                                     }
                                     if ui
-                                        .small_button("🔼 Eteen")
+                                        .small_button("▲ Eteen")
                                         .on_hover_text("Siirrä askel eteenpäin (Bring Forward) • Cmd+]")
                                         .clicked()
                                     {
                                         z_action = Some("forward");
                                     }
                                     if ui
-                                        .small_button("🔽 Taakse")
+                                        .small_button("▼ Taakse")
                                         .on_hover_text("Siirrä askel taaksepäin (Send Backward) • Cmd+[")
                                         .clicked()
                                     {
                                         z_action = Some("backward");
                                     }
                                     if ui
-                                        .small_button("⏬ Alimmaksi")
+                                        .small_button("▼▼ Alimmaksi")
                                         .on_hover_text("Vie taustalle (Send to Back) • Cmd+Shift+[")
                                         .clicked()
                                     {
@@ -1080,7 +1088,7 @@ impl PhotonVisionApp {
             } else if let Some(cid) = self.selected_connector_id {
                     let page = self.doc.current_page_mut();
                     if let Some(conn) = page.connectors.iter_mut().find(|c| c.id == cid) {
-                        ui.label(egui::RichText::new("🔌 Johdin / Yhdysviiva").strong());
+                        ui.label(egui::RichText::new("Johdin / Yhdysviiva").strong());
                         ui.add_space(4.0);
 
                         egui::Grid::new("conn_props_grid")
@@ -1168,7 +1176,7 @@ impl PhotonVisionApp {
                     ui.label("Ei valittua kohdetta.");
                     ui.add_space(6.0);
                     let page = self.doc.current_page_mut();
-                    ui.label(egui::RichText::new("📄 Sivun asetukset").strong());
+                    ui.label(egui::RichText::new("Sivun asetukset").strong());
                     egui::Grid::new("page_props_grid")
                         .num_columns(2)
                         .spacing([8.0, 6.0])
@@ -1206,10 +1214,10 @@ impl PhotonVisionApp {
                 ui.add_space(10.0);
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.heading("🗂 Tasot (Layers)");
+                    ui.heading("Tasot (Layers)");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .button("⬆️ Tekstit päällimmäiseksi")
+                            .button("⬆ Tekstit päällimmäiseksi")
                             .on_hover_text("Tuo 'Mitat & Tekstit' -taso heti ylimmäksi")
                             .clicked()
                         {
@@ -1508,14 +1516,14 @@ impl PhotonVisionApp {
                     if let Some(sid) = self.selected_shape_id {
                         ui.label(egui::RichText::new("Elementin toiminnot").strong());
                         ui.separator();
-                        if ui.button("✏️ Muokkaa tekstiä...").clicked() {
+                        if ui.button("Muokkaa tekstiä...").clicked() {
                             self.editing_shape_id = Some(sid);
                             self.focus_text_edit = true;
                             ui.close_menu();
                         }
                         ui.separator();
                         if ui
-                            .button("⏫ Tuo etualalle (Bring to Front)      Cmd+Shift+]")
+                            .button("▲▲ Tuo etualalle (Bring to Front)      Cmd+Shift+]")
                             .clicked()
                         {
                             self.push_undo();
@@ -1523,7 +1531,7 @@ impl PhotonVisionApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button("🔼 Siirrä eteenpäin (Bring Forward)  Cmd+]")
+                            .button("▲ Siirrä eteenpäin (Bring Forward)  Cmd+]")
                             .clicked()
                         {
                             self.push_undo();
@@ -1531,7 +1539,7 @@ impl PhotonVisionApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button("🔽 Siirrä taaksepäin (Send Backward) Cmd+[")
+                            .button("▼ Siirrä taaksepäin (Send Backward) Cmd+[")
                             .clicked()
                         {
                             self.push_undo();
@@ -1539,7 +1547,7 @@ impl PhotonVisionApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button("⏬ Vie taustalle (Send to Back)        Cmd+Shift+[")
+                            .button("▼▼ Vie taustalle (Send to Back)        Cmd+Shift+[")
                             .clicked()
                         {
                             self.push_undo();
@@ -1547,22 +1555,22 @@ impl PhotonVisionApp {
                             ui.close_menu();
                         }
                         ui.separator();
-                        if ui.button("📋 Kahdenna (Duplicate)                 Cmd+D").clicked() {
+                        if ui.button("Kahdenna (Duplicate)                 Cmd+D").clicked() {
                             self.duplicate_selected();
                             ui.close_menu();
                         }
-                        if ui.button("🔄 Kierrä 90°                           R").clicked() {
+                        if ui.button("Kierrä 90°                           R").clicked() {
                             self.rotate_selected(90.0);
                             ui.close_menu();
                         }
-                        if ui.button("🗑️ Poista                              Del").clicked() {
+                        if ui.button("Poista                              Del").clicked() {
                             self.delete_selected();
                             ui.close_menu();
                         }
                     } else {
                         ui.label(egui::RichText::new("Kaavion toiminnot").strong());
                         ui.separator();
-                        if ui.button("🔤 Lisää tekstilaatikko tähän").clicked() {
+                        if ui.button("Lisää tekstilaatikko tähän").clicked() {
                             if let Some(mp) = mouse_mm {
                                 self.push_undo();
                                 let id = self.doc.alloc_id();
@@ -1577,7 +1585,7 @@ impl PhotonVisionApp {
                             }
                             ui.close_menu();
                         }
-                        if ui.button("💬 Lisää huomautuskupla (Callout)").clicked() {
+                        if ui.button("Lisää huomautuskupla (Callout)").clicked() {
                             if let Some(mp) = mouse_mm {
                                 self.push_undo();
                                 let id = self.doc.alloc_id();
@@ -1592,12 +1600,12 @@ impl PhotonVisionApp {
                             ui.close_menu();
                         }
                         ui.separator();
-                        if ui.button("⬆️ Tuo tekstit päällimmäiseksi").clicked() {
+                        if ui.button("⬆ Tuo tekstit päällimmäiseksi").clicked() {
                             self.push_undo();
                             self.doc.current_page_mut().bring_layer_to_top("Mitat & Tekstit");
                             ui.close_menu();
                         }
-                        if ui.button("🔍 Nollaa zoomi (100%)").clicked() {
+                        if ui.button("Nollaa zoomi (100%)").clicked() {
                             self.zoom_px_per_mm = 3.78;
                             self.pan_offset = Vec2::ZERO;
                             ui.close_menu();
@@ -1620,7 +1628,7 @@ impl PhotonVisionApp {
             let mut close_editor = false;
             if let Some((name, center_pt)) = shape_info {
                 let center_sp = self.page_to_screen(self.canvas_origin, center_pt);
-                let title = format!("✏️ Muokkaa tekstiä: {}", name);
+                let title = format!("Muokkaa tekstiä: {}", name);
                 let mut is_open = true;
 
                 let page = self.doc.current_page_mut();
@@ -1679,7 +1687,7 @@ impl PhotonVisionApp {
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
                                 if ui
-                                    .button(egui::RichText::new(" Valmis (✓) ").strong())
+                                    .button(egui::RichText::new(" Valmis (OK) ").strong())
                                     .clicked()
                                 {
                                     close_editor = true;
@@ -2352,7 +2360,7 @@ impl PhotonVisionApp {
             painter.text(
                 sp,
                 egui::Align2::CENTER_CENTER,
-                "✏️ Kirjoita tekstiä...",
+                "Kirjoita tekstiä...",
                 FontId::proportional((10.0 * 0.3528 * self.zoom_px_per_mm).clamp(9.0, 14.0)),
                 Color32::from_rgba_unmultiplied(148, 163, 184, 180),
             );

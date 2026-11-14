@@ -28,16 +28,16 @@ impl StencilCategory {
 
     pub fn title(&self) -> String {
         match self {
-            Self::Electrical => "⚡ Sähkö & Elektroniikka (IEC)".to_string(),
-            Self::BuildingElec => "🔌 Rakennussähkö (SFS)".to_string(),
-            Self::FloorStructure => "🏠 Pohjapiirustus: Rakenteet".to_string(),
-            Self::FloorFurniture => "🛋️ Pohjapiirustus: LVI & Kalusteet".to_string(),
-            Self::FlowAndNet => "📊 Vuokaaviot & Automaatio".to_string(),
+            Self::Electrical => "Sähkö & Elektroniikka (IEC)".to_string(),
+            Self::BuildingElec => "Rakennussähkö (SFS)".to_string(),
+            Self::FloorStructure => "Pohjapiirustus: Rakenteet".to_string(),
+            Self::FloorFurniture => "Pohjapiirustus: LVI & Kalusteet".to_string(),
+            Self::FlowAndNet => "Vuokaaviot & Automaatio".to_string(),
             Self::ImportedVisio(name) => {
                 if name.is_empty() || name == "default" {
-                    "📦 Tuodut Visio-symbolit (.vssx)".to_string()
+                    "Tuodut Visio-symbolit (.vssx)".to_string()
                 } else {
-                    format!("📦 Visio: {}", name)
+                    format!("Visio: {}", name)
                 }
             }
         }
