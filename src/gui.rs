@@ -52,6 +52,8 @@ pub struct PhotonVisionApp {
     pub selected_shape_id: Option<u64>,
     pub selected_connector_id: Option<u64>,
     pub editing_shape_id: Option<u64>,
+    pub focus_text_edit: bool,
+    pub canvas_origin: Pos2,
     pub current_file: Option<PathBuf>,
     pub status_msg: String,
 
@@ -118,6 +120,8 @@ impl Default for PhotonVisionApp {
             selected_shape_id: None,
             selected_connector_id: None,
             editing_shape_id: None,
+            focus_text_edit: false,
+            canvas_origin: Pos2::ZERO,
             current_file: None,
             status_msg: "Valmis — Valitse vasemmalta symboli tai vedä vihreästä liitospisteestä johdin. Sivu 1: Sähkökaavio, Sivu 2: Pohjapiirustus 1:50.".to_string(),
             file_action_tx,
@@ -397,7 +401,7 @@ impl eframe::App for PhotonVisionApp {
             }
         }
         // Keyboard shortcuts
-        if !ctx.wants_keyboard_input() {
+        if !ctx.wants_keyboard_input() && self.editing_shape_id.is_none() {
             ctx.input(|i| {
                 if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
                     self.delete_selected();
@@ -435,6 +439,7 @@ impl eframe::App for PhotonVisionApp {
         self.render_left_stencil_panel(ctx);
         self.render_right_inspector_panel(ctx);
         self.render_center_canvas(ctx);
+        self.render_text_edit_dialog(ctx);
     }
 }
 
@@ -816,13 +821,11 @@ impl PhotonVisionApp {
                             .show(ui, |ui| {
                                 ui.label("Teksti / Tunnus:");
                                 let te = egui::TextEdit::multiline(&mut shape.label)
+                                    .id_salt("inspector_shape_label_field")
                                     .desired_rows(2)
                                     .desired_width(f32::INFINITY)
                                     .hint_text("Kirjoita teksti...");
-                                let te_res = ui.add(te);
-                                if self.editing_shape_id == Some(shape.id) {
-                                    te_res.request_focus();
-                                }
+                                ui.add(te);
                                 ui.end_row();
 
                                 ui.label("Arvo / Tieto:");
@@ -1102,6 +1105,7 @@ impl PhotonVisionApp {
                     ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
                 let painter = ui.painter_at(rect);
                 let origin = rect.min;
+                self.canvas_origin = origin;
 
                 // Handle scroll-wheel zoom & middle-drag / two-finger pan
                 if response.hovered() {
@@ -1299,73 +1303,100 @@ impl PhotonVisionApp {
 
                 // Handle Canvas Mouse Interactions
                 self.handle_canvas_interactions(&response, origin, hovered_port, mouse_mm);
-
-                // Draw inline text editor overlay on double-clicked shape
-                if let Some(edit_id) = self.editing_shape_id {
-                    let shape_geom = self
-                        .doc
-                        .current_page()
-                        .shapes
-                        .iter()
-                        .find(|s| s.id == edit_id)
-                        .map(|s| (s.x, s.y, s.width, s.height));
-
-                    if let Some((sx, sy, sw, sh)) = shape_geom {
-                        let center_sp = self.page_to_screen(origin, Point::new(sx, sy));
-                        let w_px = ((sw as f32) * self.zoom_px_per_mm).clamp(140.0, 360.0);
-                        let h_px = ((sh as f32) * self.zoom_px_per_mm).clamp(50.0, 180.0);
-                        let edit_rect = Rect::from_center_size(center_sp, Vec2::new(w_px, h_px));
-
-                        let mut close_editor = false;
-                        let page = self.doc.current_page_mut();
-                        if let Some(shape) = page.shapes.iter_mut().find(|s| s.id == edit_id) {
-                            egui::Area::new(egui::Id::new("shape_inline_text_edit"))
-                                .fixed_pos(edit_rect.min)
-                                .order(egui::Order::Foreground)
-                                .show(ui.ctx(), |ui| {
-                                    egui::Frame::popup(ui.style())
-                                        .fill(Color32::from_rgb(255, 255, 255))
-                                        .stroke(Stroke::new(1.8_f32, Color32::from_rgb(37, 99, 235)))
-                                        .corner_radius(CornerRadius::same(5))
-                                        .inner_margin(6.0)
-                                        .show(ui, |ui| {
-                                            ui.set_width(w_px - 12.0);
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    egui::RichText::new("✏️ Muokkaa tekstiä:")
-                                                        .small()
-                                                        .color(Color32::from_rgb(100, 116, 139)),
-                                                );
-                                                ui.with_layout(
-                                                    egui::Layout::right_to_left(egui::Align::Center),
-                                                    |ui| {
-                                                        if ui.small_button("Valmis (✓)").clicked() {
-                                                            close_editor = true;
-                                                        }
-                                                    },
-                                                );
-                                            });
-                                            let te = egui::TextEdit::multiline(&mut shape.label)
-                                                .desired_width(w_px - 12.0)
-                                                .desired_rows(2)
-                                                .hint_text("Kirjoita teksti...");
-                                            let te_res = ui.add(te);
-                                            te_res.request_focus();
-
-                                            if ui.input(|i| i.key_pressed(Key::Escape)) {
-                                                close_editor = true;
-                                            }
-                                        });
-                                });
-                        }
-                        if close_editor {
-                            self.editing_shape_id = None;
-                        }
-                    } else {
-                        self.editing_shape_id = None;
-                    }
-                }
             });
+    }
+
+    fn render_text_edit_dialog(&mut self, ctx: &egui::Context) {
+        if let Some(edit_id) = self.editing_shape_id {
+            let shape_info = self
+                .doc
+                .current_page()
+                .shapes
+                .iter()
+                .find(|s| s.id == edit_id)
+                .map(|s| (s.name.clone(), Point::new(s.x, s.y)));
+
+            let mut close_editor = false;
+            if let Some((name, center_pt)) = shape_info {
+                let center_sp = self.page_to_screen(self.canvas_origin, center_pt);
+                let title = format!("✏️ Muokkaa tekstiä: {}", name);
+                let mut is_open = true;
+
+                let page = self.doc.current_page_mut();
+                if let Some(shape) = page.shapes.iter_mut().find(|s| s.id == edit_id) {
+                    egui::Window::new(title)
+                        .open(&mut is_open)
+                        .id(egui::Id::new("shape_text_edit_modal_dialog"))
+                        .default_pos(center_sp + Vec2::new(15.0, -25.0))
+                        .collapsible(false)
+                        .resizable(false)
+                        .default_width(300.0)
+                        .order(egui::Order::Foreground)
+                        .show(ctx, |ui| {
+                            ui.add_space(2.0);
+                            ui.label(
+                                egui::RichText::new("Kirjoita laatikon tai muodon teksti:")
+                                    .small()
+                                    .color(Color32::from_rgb(100, 116, 139)),
+                            );
+
+                            let te = egui::TextEdit::multiline(&mut shape.label)
+                                .id_salt("dialog_shape_label_field")
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(3)
+                                .cursor_at_end(true)
+                                .hint_text("Kirjoita teksti...");
+                            let te_res = ui.add(te);
+
+                            if self.focus_text_edit {
+                                te_res.request_focus();
+                                self.focus_text_edit = false;
+                            }
+
+                            // Shortcuts:
+                            // Enter = Valmis (unless Shift is held for newline)
+                            // Escape = Valmis / Sulje
+                            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                                close_editor = true;
+                            } else if ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift) {
+                                shape.label = shape.label.trim_end_matches('\n').to_string();
+                                close_editor = true;
+                            }
+
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .button(egui::RichText::new(" Valmis (✓) ").strong())
+                                    .clicked()
+                                {
+                                    close_editor = true;
+                                }
+                                if ui.button("Tyhjennä").clicked() {
+                                    shape.label.clear();
+                                }
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        egui::RichText::new("Enter = Valmis • Shift+Enter = Rivi")
+                                            .weak()
+                                            .small(),
+                                    );
+                                });
+                            });
+                        });
+                }
+
+                if !is_open {
+                    close_editor = true;
+                }
+            } else {
+                close_editor = true;
+            }
+
+            if close_editor {
+                self.editing_shape_id = None;
+                self.focus_text_edit = false;
+            }
+        }
     }
 
     fn handle_canvas_interactions(
@@ -1661,13 +1692,17 @@ impl PhotonVisionApp {
                 self.selected_shape_id = Some(s.id);
                 self.selected_connector_id = None;
                 self.editing_shape_id = Some(s.id);
+                self.focus_text_edit = true;
                 return;
             }
         }
 
         // 6. Simple click selection
         if response.clicked() && self.pending_stencil_id.is_none() {
-            self.editing_shape_id = None;
+            if self.editing_shape_id.is_some() {
+                self.editing_shape_id = None;
+                self.focus_text_edit = false;
+            }
             let page = self.doc.current_page();
             // Hit-test connectors first
             if let Some(conn) = page
