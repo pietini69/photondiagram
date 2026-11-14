@@ -15,6 +15,11 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$PROJECT_DIR/target/release/photon_vision" "$APP_BUNDLE/Contents/MacOS/PhotonVision"
 chmod +x "$APP_BUNDLE/Contents/MacOS/PhotonVision"
 
+if [ -f "$PROJECT_DIR/assets/PhotonVision.icns" ]; then
+    cp "$PROJECT_DIR/assets/PhotonVision.icns" "$APP_BUNDLE/Contents/Resources/PhotonVision.icns"
+    echo "🎨 App-ikoni kopioitu: $APP_BUNDLE/Contents/Resources/PhotonVision.icns"
+fi
+
 cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +32,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
     <key>CFBundleName</key>
     <string>PhotonVision</string>
     <key>CFBundleDisplayName</key>
+    <string>PhotonVision</string>
+    <key>CFBundleIconFile</key>
+    <string>PhotonVision</string>
+    <key>CFBundleIconName</key>
     <string>PhotonVision</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>

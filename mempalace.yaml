@@ -1,0 +1,22 @@
+wing: photonvision
+rooms:
+- name: src
+  description: Rust source files (GUI, CAD engine, models, formats, stencils)
+  keywords:
+  - src
+  - gui
+  - model
+  - stencils
+  - formats
+- name: scripts
+  description: Build and packaging scripts
+  keywords:
+  - scripts
+- name: design
+  description: Assets, icons, and templates
+  keywords:
+  - design
+  - assets
+- name: general
+  description: Configuration and project files
+  keywords: []
