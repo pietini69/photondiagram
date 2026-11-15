@@ -65,11 +65,15 @@ Pre-compiled standalone packages are available on the **[Releases](https://githu
 ### 🍎 macOS (Apple Silicon & Intel 64-bit)
 1. Download **`PhotonDiagram-1.0.0-universal.dmg`**.
 2. Open the DMG and drag **PhotonDiagram** into your `/Applications` folder.
+3. **First Launch Note (macOS Gatekeeper):** Because this is an independent open-source release without a paid Apple Developer notarization certificate, macOS may show an *"unidentified developer"* prompt on the first launch. To open it:
+   - **Right-click** (or Ctrl-click) **`PhotonDiagram.app`** in `/Applications` and select **Open**, or
+   - If macOS Sequoia/Tahoe blocks it, open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** (or run `xattr -cr /Applications/PhotonDiagram.app` in Terminal).
 
 ### 🪟 Windows (10 / 11 64-bit)
 1. Download **`PhotonDiagram-1.0.0-windows-x64.zip`**.
 2. Extract the archive anywhere (e.g. `C:\PhotonDiagram`).
 3. Double-click **`PhotonDiagram.exe`** to run.
+4. **First Launch Note (Windows SmartScreen):** On the very first launch, Windows Defender SmartScreen may display *"Windows protected your PC"*. Click **More info** and then **Run anyway**.
 
 ### 🐧 Linux (x86_64)
 1. Download **`PhotonDiagram-1.0.0-linux-x86_64.tar.gz`**.
