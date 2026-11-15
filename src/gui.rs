@@ -1,5 +1,10 @@
 use crate::formats::export::shape_display_caption;
 use crate::formats::{load_document_from_path, load_stencil_library, save_document_to_path};
+use crate::i18n::{
+    arrow_type_label, category_title, conn_style_label, layer_display_name, scale_label,
+    stencil_display_name, stencil_name_en, text_align_label, text_pos_label,
+    translate_document_template_strings, UiLang,
+};
 use crate::model::{
     ArrowType, ConnectorStyle, DiagramConnector, DiagramDocument, DiagramPage, DiagramShape,
     DrawingScale, Point, PrimOp, TextAlign, TextPosition,
@@ -48,6 +53,7 @@ pub enum FileAction {
 }
 
 pub struct PhotonDiagramApp {
+    pub lang: UiLang,
     pub doc: DiagramDocument,
     pub stencils: Vec<StencilItem>,
     pub stencil_search: String,
@@ -119,7 +125,11 @@ impl Default for PhotonDiagramApp {
             doc.pages.push(fp_page);
         }
 
+        let lang = UiLang::detect_system();
+        translate_document_template_strings(&mut doc, lang);
+
         Self {
+            lang,
             doc,
             stencils: built_in_stencils(),
             stencil_search: String::new(),
@@ -132,7 +142,12 @@ impl Default for PhotonDiagramApp {
             focus_text_edit: false,
             canvas_origin: Pos2::ZERO,
             current_file: None,
-            status_msg: "Valmis — Valitse vasemmalta symboli tai vedä vihreästä liitospisteestä johdin. Sivu 1: Sähkökaavio, Sivu 2: Pohjapiirustus 1:50.".to_string(),
+            status_msg: lang
+                .tr(
+                    "Valmis — Valitse vasemmalta symboli tai vedä vihreästä liitospisteestä johdin. Sivu 1: Sähkökaavio, Sivu 2: Pohjapiirustus 1:50.",
+                    "Ready — Select a symbol on the left or drag a wire from a green port. Page 1: Electrical Schematic, Page 2: Floor Plan 1:50.",
+                )
+                .to_string(),
             file_action_tx,
             file_action_rx,
             zoom_px_per_mm: 3.4,
@@ -179,7 +194,10 @@ impl PhotonDiagramApp {
         if let Some(prev) = self.undo_stack.pop() {
             self.redo_stack.push(self.doc.clone());
             self.doc = prev;
-            self.status_msg = "Kumottu edellinen toiminto.".to_string();
+            self.status_msg = self
+                .lang
+                .tr("Kumottu edellinen toiminto.", "Undid last action.")
+                .to_string();
         }
     }
 
@@ -187,7 +205,23 @@ impl PhotonDiagramApp {
         if let Some(next) = self.redo_stack.pop() {
             self.undo_stack.push(self.doc.clone());
             self.doc = next;
-            self.status_msg = "Tehty uudelleen.".to_string();
+            self.status_msg = self
+                .lang
+                .tr("Tehty uudelleen.", "Redid action.")
+                .to_string();
+        }
+    }
+
+    pub fn set_language(&mut self, lang: UiLang, ctx: &egui::Context) {
+        if self.lang != lang {
+            self.lang = lang;
+            translate_document_template_strings(&mut self.doc, lang);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                lang.window_title().to_string(),
+            ));
+            self.status_msg = lang
+                .tr("Kieli vaihdettu: Suomi (FI).", "Language changed: English (EN).")
+                .to_string();
         }
     }
 
@@ -306,15 +340,23 @@ impl PhotonDiagramApp {
             let count = sids.len();
             self.clear_selection();
             self.status_msg = if count == 1 {
-                "Komponentti poistettu.".to_string()
+                self.lang
+                    .tr("Komponentti poistettu.", "Component deleted.")
+                    .to_string()
             } else {
-                format!("{} komponenttia poistettu.", count)
+                match self.lang {
+                    UiLang::Fi => format!("{} komponenttia poistettu.", count),
+                    UiLang::En => format!("{} components deleted.", count),
+                }
             };
         } else if let Some(cid) = self.selected_connector_id.take() {
             self.push_undo();
             let page = self.doc.current_page_mut();
             page.connectors.retain(|c| c.id != cid);
-            self.status_msg = "Johdin poistettu.".to_string();
+            self.status_msg = self
+                .lang
+                .tr("Johdin poistettu.", "Wire deleted.")
+                .to_string();
         }
     }
 
@@ -343,9 +385,14 @@ impl PhotonDiagramApp {
             let count = new_ids.len();
             self.select_shapes(new_ids);
             self.status_msg = if count == 1 {
-                "Komponentti monistettu.".to_string()
+                self.lang
+                    .tr("Komponentti monistettu.", "Component duplicated.")
+                    .to_string()
             } else {
-                format!("{} komponenttia monistettu.", count)
+                match self.lang {
+                    UiLang::Fi => format!("{} komponenttia monistettu.", count),
+                    UiLang::En => format!("{} components duplicated.", count),
+                }
             };
         }
     }
@@ -353,12 +400,16 @@ impl PhotonDiagramApp {
     fn open_file_dialog(&self, ctx: &egui::Context) {
         let tx = self.file_action_tx.clone();
         let ctx = ctx.clone();
+        let lang = self.lang;
 
         std::thread::spawn(move || {
             pollster::block_on(async move {
                 if let Some(handle) = rfd::AsyncFileDialog::new()
                     .add_filter(
-                        "Tuetut kaaviot & projektit (.vsdx, .vdx, .vsd, .lbrn2, .pvis)",
+                        lang.tr(
+                            "Tuetut kaaviot & projektit (.vsdx, .vdx, .vsd, .lbrn2, .pvis)",
+                            "Supported Diagrams & Projects (.vsdx, .vdx, .vsd, .lbrn2, .pvis)",
+                        ),
                         &["vsdx", "vdx", "vsd", "lbrn2", "lbrn", "pvis", "json"],
                     )
                     .add_filter("PhotonCAM / LightBurn (.lbrn2)", &["lbrn2", "lbrn"])
@@ -400,11 +451,12 @@ impl PhotonDiagramApp {
         let ctx = ctx.clone();
         let ext = default_ext.to_string();
         let label = filter_label.to_string();
+        let default_Base = self.lang.tr("kaavio", "diagram");
         let default_name = if let Some(ref cf) = self.current_file {
-            let stem = cf.file_stem().and_then(|s| s.to_str()).unwrap_or("kaavio");
+            let stem = cf.file_stem().and_then(|s| s.to_str()).unwrap_or(default_Base);
             format!("{}.{}", stem, ext)
         } else {
-            format!("kaavio.{}", ext)
+            format!("{}.{}", default_Base, ext)
         };
 
         std::thread::spawn(move || {
@@ -439,22 +491,34 @@ impl eframe::App for PhotonDiagramApp {
                         self.current_file = Some(path.clone());
                         self.selected_shape_id = None;
                         self.selected_connector_id = None;
-                        self.status_msg = format!("Avattu tiedosto: {}", path.display());
+                        self.status_msg = match self.lang {
+                            UiLang::Fi => format!("Avattu tiedosto: {}", path.display()),
+                            UiLang::En => format!("Opened file: {}", path.display()),
+                        };
                     }
                     Err(e) => {
-                        self.status_msg = format!("Virhe avattaessa: {}", e);
+                        self.status_msg = match self.lang {
+                            UiLang::Fi => format!("Virhe avattaessa: {}", e),
+                            UiLang::En => format!("Error opening file: {}", e),
+                        };
                     }
                 },
                 FileAction::SaveDocument(path) => match save_document_to_path(&self.doc, &path) {
                     Ok(()) => {
                         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                        if ext == "pvis" || ext == "vsdx" {
+                        if ext == "pvis" || ext == "pdiag" || ext == "vsdx" {
                             self.current_file = Some(path.clone());
                         }
-                        self.status_msg = format!("Tallennettu: {}", path.display());
+                        self.status_msg = match self.lang {
+                            UiLang::Fi => format!("Tallennettu: {}", path.display()),
+                            UiLang::En => format!("Saved: {}", path.display()),
+                        };
                     }
                     Err(e) => {
-                        self.status_msg = format!("Tallennusvirhe: {}", e);
+                        self.status_msg = match self.lang {
+                            UiLang::Fi => format!("Tallennusvirhe: {}", e),
+                            UiLang::En => format!("Save error: {}", e),
+                        };
                     }
                 },
                 FileAction::ImportVssx(paths) => {
@@ -471,17 +535,30 @@ impl eframe::App for PhotonDiagramApp {
                                 self.stencils.extend(items);
                             }
                             Err(e) => {
-                                self.status_msg =
-                                    format!("VSSX-tuontivirhe ({}): {}", path.display(), e);
+                                self.status_msg = match self.lang {
+                                    UiLang::Fi => {
+                                        format!("VSSX-tuontivirhe ({}): {}", path.display(), e)
+                                    }
+                                    UiLang::En => {
+                                        format!("VSSX import error ({}): {}", path.display(), e)
+                                    }
+                                };
                             }
                         }
                     }
                     if total > 0 {
-                        self.status_msg = format!(
-                            "Tuotu yhteensä {} Visio-symbolia kirjastoista: {}!",
-                            total,
-                            names.join(", ")
-                        );
+                        self.status_msg = match self.lang {
+                            UiLang::Fi => format!(
+                                "Tuotu yhteensä {} Visio-symbolia kirjastoista: {}!",
+                                total,
+                                names.join(", ")
+                            ),
+                            UiLang::En => format!(
+                                "Imported {} Visio stencils from libraries: {}!",
+                                total,
+                                names.join(", ")
+                            ),
+                        };
                     }
                 }
                 FileAction::SetStatus(msg) => {
@@ -518,7 +595,10 @@ impl eframe::App for PhotonDiagramApp {
                     let all_ids: Vec<u64> = self.doc.current_page().shapes.iter().map(|s| s.id).collect();
                     let count = all_ids.len();
                     self.select_shapes(all_ids);
-                    self.status_msg = format!("Valittu kaikki {} komponenttia.", count);
+                    self.status_msg = match self.lang {
+                        UiLang::Fi => format!("Valittu kaikki {} komponenttia.", count),
+                        UiLang::En => format!("Selected all {} components.", count),
+                    };
                 }
                 if i.modifiers.command && i.key_pressed(Key::Z) {
                     if i.modifiers.shift {
@@ -570,129 +650,249 @@ impl eframe::App for PhotonDiagramApp {
 
 impl PhotonDiagramApp {
     fn render_top_bar(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // 1. Menu bar
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("Tiedosto", |ui| {
-                    if ui.button("Uusi tyhjä kaavio").clicked() {
+                ui.menu_button(lang.tr("Tiedosto", "File"), |ui| {
+                    if ui
+                        .button(lang.tr("Uusi tyhjä kaavio", "New Blank Diagram"))
+                        .clicked()
+                    {
                         self.push_undo();
-                        self.doc = DiagramDocument::default();
+                        let mut new_doc = DiagramDocument::default();
+                        translate_document_template_strings(&mut new_doc, lang);
+                        self.doc = new_doc;
                         self.selected_shape_id = None;
                         self.selected_connector_id = None;
                         ui.close_menu();
                     }
                     ui.separator();
                     if ui
-                        .button("Avaa (.vsdx, .vdx, .vsd, .lbrn2, .pvis)...")
+                        .button(lang.tr(
+                            "Avaa (.vsdx, .vdx, .vsd, .lbrn2, .pvis)...",
+                            "Open (.vsdx, .vdx, .vsd, .lbrn2, .pvis)...",
+                        ))
                         .clicked()
                     {
                         ui.close_menu();
                         self.open_file_dialog(ui.ctx());
                     }
                     if ui
-                        .button("Tuo Visio-symbolikirjasto (.vssx)...")
+                        .button(lang.tr(
+                            "Tuo Visio-symbolikirjasto (.vssx)...",
+                            "Import Visio Stencil Library (.vssx)...",
+                        ))
                         .clicked()
                     {
                         ui.close_menu();
                         self.import_vssx_dialog(ui.ctx());
                     }
                     ui.separator();
-                    if ui.button("Tallenna PhotonDiagram (.pdiag)...").clicked() {
+                    if ui
+                        .button(lang.tr(
+                            "Tallenna PhotonDiagram (.pdiag)...",
+                            "Save PhotonDiagram (.pdiag)...",
+                        ))
+                        .clicked()
+                    {
                         ui.close_menu();
                         self.save_file_as_dialog("pdiag", "PhotonDiagram (.pdiag)", ui.ctx());
                     }
                     if ui
-                        .button("Tallenna Microsoft Visio (.vsdx)...")
+                        .button(lang.tr(
+                            "Tallenna Microsoft Visio (.vsdx)...",
+                            "Save Microsoft Visio (.vsdx)...",
+                        ))
                         .clicked()
                     {
                         ui.close_menu();
-                        self.save_file_as_dialog("vsdx", "Microsoft Visio 2013+ (.vsdx)", ui.ctx());
+                        self.save_file_as_dialog(
+                            "vsdx",
+                            "Microsoft Visio 2013+ (.vsdx)",
+                            ui.ctx(),
+                        );
                     }
-                    if ui.button("Tallenna Visio XML (.vdx)...").clicked() {
+                    if ui
+                        .button(lang.tr("Tallenna Visio XML (.vdx)...", "Save Visio XML (.vdx)..."))
+                        .clicked()
+                    {
                         ui.close_menu();
                         self.save_file_as_dialog("vdx", "Visio XML Drawing (.vdx)", ui.ctx());
                     }
                     ui.separator();
-                    if ui.button("Vie PhotonCAM / LightBurn (.lbrn2)...").clicked() {
+                    if ui
+                        .button(lang.tr(
+                            "Vie PhotonCAM / LightBurn (.lbrn2)...",
+                            "Export PhotonCAM / LightBurn (.lbrn2)...",
+                        ))
+                        .clicked()
+                    {
                         ui.close_menu();
-                        self.save_file_as_dialog("lbrn2", "PhotonCAM / LightBurn Laser Project (.lbrn2)", ui.ctx());
+                        self.save_file_as_dialog(
+                            "lbrn2",
+                            "PhotonCAM / LightBurn Laser Project (.lbrn2)",
+                            ui.ctx(),
+                        );
                     }
-                    if ui.button("Vie SVG-vektorikuva (.svg)...").clicked() {
+                    if ui
+                        .button(lang.tr("Vie SVG-vektorikuva (.svg)...", "Export SVG Vector (.svg)..."))
+                        .clicked()
+                    {
                         ui.close_menu();
                         self.save_file_as_dialog("svg", "SVG Vector Graphics (.svg)", ui.ctx());
                     }
-                    if ui.button("Vie AutoCAD DXF (.dxf)...").clicked() {
+                    if ui
+                        .button(lang.tr("Vie AutoCAD DXF (.dxf)...", "Export AutoCAD DXF (.dxf)..."))
+                        .clicked()
+                    {
                         ui.close_menu();
                         self.save_file_as_dialog("dxf", "AutoCAD DXF (.dxf)", ui.ctx());
                     }
                     if ui
-                        .button("Vie Osaluettelo / Huoneet (.csv)...")
+                        .button(lang.tr(
+                            "Vie Osaluettelo / Huoneet (.csv)...",
+                            "Export Bill of Materials / Rooms (.csv)...",
+                        ))
                         .clicked()
                     {
                         ui.close_menu();
-                        self.save_file_as_dialog("csv", "Osaluettelo BOM (.csv)", ui.ctx());
+                        self.save_file_as_dialog(
+                            "csv",
+                            lang.tr("Osaluettelo BOM (.csv)", "Bill of Materials BOM (.csv)"),
+                            ui.ctx(),
+                        );
                     }
                 });
 
-                ui.menu_button("Valmiit mallipohjat", |ui| {
+                ui.menu_button(lang.tr("Valmiit mallipohjat", "Templates"), |ui| {
                     if ui
-                        .button("Sähkö- & Ohjauskytkentäkaavio (IEC / PLC)")
+                        .button(lang.tr(
+                            "Sähkö- & Ohjauskytkentäkaavio (IEC / PLC)",
+                            "Electrical & PLC Control Schematic (IEC)",
+                        ))
                         .clicked()
                     {
                         self.push_undo();
-                        self.doc = template_electrical_schematic();
+                        let mut doc = template_electrical_schematic();
+                        translate_document_template_strings(&mut doc, lang);
+                        self.doc = doc;
                         self.selected_shape_id = None;
                         self.selected_connector_id = None;
-                        self.status_msg =
-                            "Ladattu mallipohja: Sähkö- ja ohjauskytkentäkaavio (IEC).".to_string();
+                        self.status_msg = lang
+                            .tr(
+                                "Ladattu mallipohja: Sähkö- ja ohjauskytkentäkaavio (IEC).",
+                                "Loaded template: Electrical & PLC Control Schematic (IEC).",
+                            )
+                            .to_string();
                         ui.close_menu();
                     }
                     if ui
-                        .button("Omakotitalon pohjapiirustus + SFS-sähkösuunnitelma (1:50)")
+                        .button(lang.tr(
+                            "Omakotitalon pohjapiirustus + SFS-sähkösuunnitelma (1:50)",
+                            "House Floor Plan + Electrical Layout (1:50)",
+                        ))
                         .clicked()
                     {
                         self.push_undo();
-                        self.doc = template_floorplan_and_sfs_elec();
+                        let mut doc = template_floorplan_and_sfs_elec();
+                        translate_document_template_strings(&mut doc, lang);
+                        self.doc = doc;
                         self.selected_shape_id = None;
                         self.selected_connector_id = None;
-                        self.status_msg =
-                            "Ladattu mallipohja: Pohjapiirustus + SFS-sähkösuunnitelma (1:50)."
-                                .to_string();
+                        self.status_msg = lang
+                            .tr(
+                                "Ladattu mallipohja: Pohjapiirustus + SFS-sähkösuunnitelma (1:50).",
+                                "Loaded template: House Floor Plan + Electrical Layout (1:50).",
+                            )
+                            .to_string();
                         ui.close_menu();
                     }
                 });
 
-                ui.menu_button("Muokkaa", |ui| {
-                    if ui.button("↩ Kumoa (Cmd+Z)").clicked() {
+                ui.menu_button(lang.tr("Muokkaa", "Edit"), |ui| {
+                    if ui
+                        .button(lang.tr("↩ Kumoa (Cmd+Z)", "↩ Undo (Cmd+Z)"))
+                        .clicked()
+                    {
                         self.undo();
                         ui.close_menu();
                     }
-                    if ui.button("↪ Tee uudelleen (Cmd+Shift+Z)").clicked() {
+                    if ui
+                        .button(lang.tr(
+                            "↪ Tee uudelleen (Cmd+Shift+Z)",
+                            "↪ Redo (Cmd+Shift+Z)",
+                        ))
+                        .clicked()
+                    {
                         self.redo();
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Monista valittu (Cmd+D)").clicked() {
+                    if ui
+                        .button(lang.tr("Monista valittu (Cmd+D)", "Duplicate Selected (Cmd+D)"))
+                        .clicked()
+                    {
                         self.duplicate_selected();
                         ui.close_menu();
                     }
-                    if ui.button("Kierrä 90° (R)").clicked() {
+                    if ui
+                        .button(lang.tr("Kierrä 90° (R)", "Rotate 90° (R)"))
+                        .clicked()
+                    {
                         self.rotate_selected(90.0);
                         ui.close_menu();
                     }
-                    if ui.button("↔ Peilaa vaakasuunnassa (H)").clicked() {
+                    if ui
+                        .button(lang.tr(
+                            "↔ Peilaa vaakasuunnassa (H)",
+                            "↔ Flip Horizontally (H)",
+                        ))
+                        .clicked()
+                    {
                         self.flip_selected(true);
                         ui.close_menu();
                     }
-                    if ui.button("↕ Peilaa pystysuunnassa (V)").clicked() {
+                    if ui
+                        .button(lang.tr(
+                            "↕ Peilaa pystysuunnassa (V)",
+                            "↕ Flip Vertically (V)",
+                        ))
+                        .clicked()
+                    {
                         self.flip_selected(false);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Poista valittu (Backspace)").clicked() {
+                    if ui
+                        .button(lang.tr(
+                            "Poista valittu (Backspace)",
+                            "Delete Selected (Backspace)",
+                        ))
+                        .clicked()
+                    {
                         self.delete_selected();
                         ui.close_menu();
                     }
+                });
+
+                // Language selector on the right side of the menu bar
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .selectable_label(self.lang == UiLang::En, "🇬🇧 EN")
+                        .on_hover_text("Switch language to English")
+                        .clicked()
+                    {
+                        self.set_language(UiLang::En, ctx);
+                    }
+                    if ui
+                        .selectable_label(self.lang == UiLang::Fi, "🇫🇮 FI")
+                        .on_hover_text("Vaihda kieleksi Suomi")
+                        .clicked()
+                    {
+                        self.set_language(UiLang::Fi, ctx);
+                    }
+                    ui.label(egui::RichText::new(lang.tr("Kieli:", "Lang:")).weak());
                 });
             });
 
@@ -700,15 +900,15 @@ impl PhotonDiagramApp {
 
             // 2. Primary Toolbar
             ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new("Työkalu:").strong());
+                ui.label(egui::RichText::new(lang.tr("Työkalu:", "Tool:")).strong());
                 for (tool, label) in [
-                    (ActiveTool::Select, "↖ Valitse"),
-                    (ActiveTool::Wire, "Johdin"),
-                    (ActiveTool::DrawText, "Teksti"),
-                    (ActiveTool::DrawWall, "Seinä"),
-                    (ActiveTool::DrawRoom, "Huone (m²)"),
-                    (ActiveTool::DrawDimension, "Mittaviiva"),
-                    (ActiveTool::Pan, "Vieritä"),
+                    (ActiveTool::Select, lang.tr("↖ Valitse", "↖ Select")),
+                    (ActiveTool::Wire, lang.tr("Johdin", "Wire")),
+                    (ActiveTool::DrawText, lang.tr("Teksti", "Text")),
+                    (ActiveTool::DrawWall, lang.tr("Seinä", "Wall")),
+                    (ActiveTool::DrawRoom, lang.tr("Huone (m²)", "Room (m²)")),
+                    (ActiveTool::DrawDimension, lang.tr("Mittaviiva", "Dimension")),
+                    (ActiveTool::Pan, lang.tr("Vieritä", "Pan")),
                 ] {
                     if ui
                         .selectable_label(
@@ -726,22 +926,30 @@ impl PhotonDiagramApp {
                 ui.separator();
 
                 // Quick actions on selection
-                if ui.button("90°").on_hover_text("Kierrä 90° (R)").clicked() {
+                if ui
+                    .button("90°")
+                    .on_hover_text(lang.tr("Kierrä 90° (R)", "Rotate 90° (R)"))
+                    .clicked()
+                {
                     self.rotate_selected(90.0);
                 }
-                if ui.button("↔ Peilaa").on_hover_text("Peilaa (H)").clicked() {
+                if ui
+                    .button(lang.tr("↔ Peilaa", "↔ Flip"))
+                    .on_hover_text(lang.tr("Peilaa (H)", "Flip Horizontally (H)"))
+                    .clicked()
+                {
                     self.flip_selected(true);
                 }
                 if ui
-                    .button("Monista")
-                    .on_hover_text("Monista valittu (Cmd+D)")
+                    .button(lang.tr("Monista", "Duplicate"))
+                    .on_hover_text(lang.tr("Monista valittu (Cmd+D)", "Duplicate Selected (Cmd+D)"))
                     .clicked()
                 {
                     self.duplicate_selected();
                 }
                 if ui
-                    .button("Poista")
-                    .on_hover_text("Poista valittu (Delete)")
+                    .button(lang.tr("Poista", "Delete"))
+                    .on_hover_text(lang.tr("Poista valittu (Delete)", "Delete Selected (Delete)"))
                     .clicked()
                 {
                     self.delete_selected();
@@ -750,10 +958,10 @@ impl PhotonDiagramApp {
                 ui.separator();
 
                 // Scale selector for current page
-                ui.label("Mittakaava:");
+                ui.label(lang.tr("Mittakaava:", "Scale:"));
                 let current_scale = self.doc.current_page().scale;
                 egui::ComboBox::from_id_salt("scale_combo")
-                    .selected_text(current_scale.label())
+                    .selected_text(scale_label(current_scale, lang))
                     .show_ui(ui, |ui| {
                         for sc in [
                             DrawingScale::Scale1To1,
@@ -766,28 +974,42 @@ impl PhotonDiagramApp {
                                 .selectable_value(
                                     &mut self.doc.current_page_mut().scale,
                                     sc,
-                                    sc.label(),
+                                    scale_label(sc, lang),
                                 )
                                 .clicked()
                             {
-                                self.status_msg =
-                                    format!("Sivun mittakaavaksi asetettu {}", sc.label());
+                                self.status_msg = match lang {
+                                    UiLang::Fi => format!(
+                                        "Sivun mittakaavaksi asetettu {}",
+                                        scale_label(sc, lang)
+                                    ),
+                                    UiLang::En => {
+                                        format!("Page scale set to {}", scale_label(sc, lang))
+                                    }
+                                };
                             }
                         }
                     });
 
                 ui.separator();
-                ui.checkbox(&mut self.doc.snap_to_grid, "Tartu ruudukkoon");
-                ui.checkbox(&mut self.doc.show_line_jumps, "Johdinhypyt (sillat)");
+                ui.checkbox(
+                    &mut self.doc.snap_to_grid,
+                    lang.tr("Tartu ruudukkoon", "Snap to Grid"),
+                );
+                ui.checkbox(
+                    &mut self.doc.show_line_jumps,
+                    lang.tr("Johdinhypyt (sillat)", "Wire Jumps (Bridges)"),
+                );
             });
         });
     }
 
     fn render_bottom_bar(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 // Page tabs
-                ui.label(egui::RichText::new("Sivut:").strong());
+                ui.label(egui::RichText::new(lang.tr("Sivut:", "Pages:")).strong());
                 let mut switch_to = None;
                 for (idx, p) in self.doc.pages.iter().enumerate() {
                     if ui
@@ -803,10 +1025,16 @@ impl PhotonDiagramApp {
                     self.selected_connector_id = None;
                 }
 
-                if ui.small_button("+ Uusi sivu").clicked() {
+                if ui
+                    .small_button(lang.tr("+ Uusi sivu", "+ New Page"))
+                    .clicked()
+                {
                     let n = self.doc.pages.len() + 1;
                     let mut p = DiagramPage::default();
-                    p.name = format!("Sivu {}", n);
+                    p.name = match lang {
+                        UiLang::Fi => format!("Sivu {}", n),
+                        UiLang::En => format!("Page {}", n),
+                    };
                     self.doc.pages.push(p);
                     self.doc.active_page = self.doc.pages.len() - 1;
                 }
@@ -820,7 +1048,7 @@ impl PhotonDiagramApp {
                 if ui.small_button("+").clicked() {
                     self.zoom_px_per_mm = (self.zoom_px_per_mm * 1.18).clamp(0.8, 15.0);
                 }
-                if ui.small_button("Sopiva").clicked() {
+                if ui.small_button(lang.tr("Sopiva", "Fit")).clicked() {
                     self.zoom_px_per_mm = 3.4;
                     self.pan_offset = Vec2::new(42.0, 36.0);
                 }
@@ -832,15 +1060,19 @@ impl PhotonDiagramApp {
     }
 
     fn render_left_stencil_panel(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
         egui::SidePanel::left("stencil_panel")
             .default_width(250.0)
             .resizable(true)
             .show(ctx, |ui| {
-                ui.heading("Symbolikirjasto");
+                ui.heading(lang.tr("Symbolikirjasto", "Symbol Library"));
                 ui.horizontal(|ui| {
-                    ui.label("Etsi:");
+                    ui.label(lang.tr("Etsi:", "Search:"));
                     ui.text_edit_singleline(&mut self.stencil_search)
-                        .on_hover_text("Hae esim. vastus, rele, pistorasia, ovi, kiuas...");
+                        .on_hover_text(lang.tr(
+                            "Hae esim. vastus, rele, pistorasia, ovi, kiuas...",
+                            "Search e.g. resistor, relay, socket, door, stove...",
+                        ));
                     if !self.stencil_search.is_empty() && ui.small_button("×").clicked() {
                         self.stencil_search.clear();
                     }
@@ -865,9 +1097,13 @@ impl PhotonDiagramApp {
                             .stencils
                             .iter()
                             .filter(|s| {
+                                let en_match = stencil_name_en(&s.id)
+                                    .map(|en| en.to_lowercase().contains(&query))
+                                    .unwrap_or(false);
                                 s.category == cat
                                     && (query.is_empty()
                                         || s.name.to_lowercase().contains(&query)
+                                        || en_match
                                         || s.id.to_lowercase().contains(&query))
                             })
                             .cloned()
@@ -879,14 +1115,20 @@ impl PhotonDiagramApp {
 
                         let _is_imported = cat.is_imported();
                         egui::CollapsingHeader::new(
-                            egui::RichText::new(format!("{} ({})", cat.title(), cat_items.len()))
-                                .strong(),
+                            egui::RichText::new(format!(
+                                "{} ({})",
+                                category_title(&cat, lang),
+                                cat_items.len()
+                            ))
+                            .strong(),
                         )
                         .default_open(true)
                         .show(ui, |ui| {
                             for item in cat_items {
                                 let is_armed =
                                     self.pending_stencil_id.as_deref() == Some(item.id.as_str());
+                                let disp_name =
+                                    stencil_display_name(&item.id, &item.name, lang);
                                 ui.horizontal(|ui| {
                                     // Draw live mini vector preview of stencil
                                     let (rect, _) = ui.allocate_exact_size(
@@ -896,17 +1138,24 @@ impl PhotonDiagramApp {
                                     draw_stencil_mini_preview(ui.painter(), rect, &item);
 
                                     if ui
-                                        .selectable_label(is_armed, &item.name)
-                                        .on_hover_text(
+                                        .selectable_label(is_armed, disp_name)
+                                        .on_hover_text(lang.tr(
                                             "Klikkaa lisätäksesi kaavioon tai valitse sijoitettavaksi",
-                                        )
+                                            "Click to select symbol and place on canvas",
+                                        ))
                                         .clicked()
                                     {
                                         self.pending_stencil_id = Some(item.id.clone());
-                                        self.status_msg = format!(
-                                            "Valittu symboli '{}' — klikkaa kaavioaluetta sijoittaaksesi.",
-                                            item.name
-                                        );
+                                        self.status_msg = match lang {
+                                            UiLang::Fi => format!(
+                                                "Valittu symboli '{}' — klikkaa kaavioaluetta sijoittaaksesi.",
+                                                disp_name
+                                            ),
+                                            UiLang::En => format!(
+                                                "Selected symbol '{}' — click on canvas to place.",
+                                                disp_name
+                                            ),
+                                        };
                                     }
                                 });
                             }
@@ -917,11 +1166,12 @@ impl PhotonDiagramApp {
     }
 
     fn render_right_inspector_panel(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
         egui::SidePanel::right("inspector_panel")
             .default_width(275.0)
             .resizable(true)
             .show(ctx, |ui| {
-                ui.heading("Ominaisuudet");
+                ui.heading(lang.tr("Ominaisuudet", "Properties"));
                 ui.separator();
 
                 let scale = self.doc.current_page().scale;
@@ -935,35 +1185,64 @@ impl PhotonDiagramApp {
 
                 let sel_ids = self.selected_shape_ids();
                 if sel_ids.len() > 1 {
+                    let group_title = match lang {
+                        UiLang::Fi => format!("Ryhmävalinta ({} kpl)", sel_ids.len()),
+                        UiLang::En => format!("Group Selection ({} items)", sel_ids.len()),
+                    };
                     ui.label(
-                        egui::RichText::new(format!("Ryhmävalinta ({} kpl)", sel_ids.len()))
+                        egui::RichText::new(group_title)
                             .strong()
                             .color(Color32::from_rgb(37, 99, 235)),
                     );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Monista").on_hover_text("Monista valitut (Cmd+D)").clicked() {
+                        if ui
+                            .button(lang.tr("Monista", "Duplicate"))
+                            .on_hover_text(lang.tr(
+                                "Monista valitut (Cmd+D)",
+                                "Duplicate selected (Cmd+D)",
+                            ))
+                            .clicked()
+                        {
                             self.duplicate_selected();
                         }
-                        if ui.button("Poista").on_hover_text("Poista valitut (Delete)").clicked() {
+                        if ui
+                            .button(lang.tr("Poista", "Delete"))
+                            .on_hover_text(lang.tr(
+                                "Poista valitut (Delete)",
+                                "Delete selected (Delete)",
+                            ))
+                            .clicked()
+                        {
                             self.delete_selected();
                         }
                     });
                     ui.horizontal(|ui| {
-                        if ui.button("90°").on_hover_text("Kierrä 90° (R)").clicked() {
+                        if ui
+                            .button("90°")
+                            .on_hover_text(lang.tr("Kierrä 90° (R)", "Rotate 90° (R)"))
+                            .clicked()
+                        {
                             self.rotate_selected(90.0);
                         }
-                        if ui.button("↔ Peilaa").on_hover_text("Peilaa vaakasuunnassa (H)").clicked() {
+                        if ui
+                            .button(lang.tr("↔ Peilaa", "↔ Flip"))
+                            .on_hover_text(lang.tr(
+                                "Peilaa vaakasuunnassa (H)",
+                                "Flip horizontally (H)",
+                            ))
+                            .clicked()
+                        {
                             self.flip_selected(true);
                         }
                     });
                     ui.add_space(8.0);
-                    ui.label("Aseta taso kaikille:");
+                    ui.label(lang.tr("Aseta taso kaikille:", "Set layer for all:"));
                     egui::ComboBox::from_id_salt("multi_shape_layer_combo")
-                        .selected_text("Valitse taso...")
+                        .selected_text(lang.tr("Valitse taso...", "Select layer..."))
                         .show_ui(ui, |ui| {
                             for ln in &layer_names {
-                                if ui.button(ln).clicked() {
+                                if ui.button(layer_display_name(ln, lang)).clicked() {
                                     self.push_undo();
                                     let page = self.doc.current_page_mut();
                                     for s in &mut page.shapes {
@@ -975,27 +1254,39 @@ impl PhotonDiagramApp {
                             }
                         });
                     ui.add_space(8.0);
-                    ui.label("Järjestys (Z-Order):");
+                    ui.label(lang.tr("Järjestys (Z-Order):", "Z-Order:"));
                     ui.horizontal(|ui| {
-                        if ui.small_button("▲▲ Ylimmäksi").clicked() {
+                        if ui
+                            .small_button(lang.tr("▲▲ Ylimmäksi", "▲▲ Front"))
+                            .clicked()
+                        {
                             self.push_undo();
                             for sid in &sel_ids {
                                 self.doc.current_page_mut().bring_to_front(*sid);
                             }
                         }
-                        if ui.small_button("▲ Eteen").clicked() {
+                        if ui
+                            .small_button(lang.tr("▲ Eteen", "▲ Forward"))
+                            .clicked()
+                        {
                             self.push_undo();
                             for sid in &sel_ids {
                                 self.doc.current_page_mut().bring_forward(*sid);
                             }
                         }
-                        if ui.small_button("▼ Taakse").clicked() {
+                        if ui
+                            .small_button(lang.tr("▼ Taakse", "▼ Backward"))
+                            .clicked()
+                        {
                             self.push_undo();
                             for sid in &sel_ids {
                                 self.doc.current_page_mut().send_backward(*sid);
                             }
                         }
-                        if ui.small_button("▼▼ Alimmaksi").clicked() {
+                        if ui
+                            .small_button(lang.tr("▼▼ Alimmaksi", "▼▼ Back"))
+                            .clicked()
+                        {
                             self.push_undo();
                             for sid in &sel_ids {
                                 self.doc.current_page_mut().send_to_back(*sid);
@@ -1007,322 +1298,358 @@ impl PhotonDiagramApp {
                     {
                         let page = self.doc.current_page_mut();
                         if let Some(shape) = page.shapes.iter_mut().find(|s| s.id == sid) {
+                            let disp_shape_name =
+                                stencil_display_name(&shape.stencil_id, &shape.name, lang);
                             ui.label(
-                                egui::RichText::new(format!("Komponentti: {}", shape.name)).strong(),
+                                egui::RichText::new(format!(
+                                    "{}: {}",
+                                    lang.tr("Komponentti", "Component"),
+                                    disp_shape_name
+                                ))
+                                .strong(),
                             );
                             ui.add_space(4.0);
 
                             egui::Grid::new("shape_props_grid")
-                            .num_columns(2)
-                            .spacing([8.0, 6.0])
-                            .show(ui, |ui| {
-                                ui.label("Teksti / Tunnus:");
-                                let te = egui::TextEdit::multiline(&mut shape.label)
-                                    .id_salt("inspector_shape_label_field")
-                                    .desired_rows(2)
-                                    .desired_width(f32::INFINITY)
-                                    .hint_text("Kirjoita teksti...");
-                                ui.add(te);
-                                ui.end_row();
+                                .num_columns(2)
+                                .spacing([8.0, 6.0])
+                                .show(ui, |ui| {
+                                    ui.label(lang.tr("Teksti / Tunnus:", "Text / Designator:"));
+                                    let te = egui::TextEdit::multiline(&mut shape.label)
+                                        .id_salt("inspector_shape_label_field")
+                                        .desired_rows(2)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text(lang.tr("Kirjoita teksti...", "Enter text..."));
+                                    ui.add(te);
+                                    ui.end_row();
 
-                                ui.label("Arvo / Tieto:");
-                                ui.text_edit_singleline(&mut shape.value);
-                                ui.end_row();
+                                    ui.label(lang.tr("Arvo / Tieto:", "Value / Rating:"));
+                                    ui.text_edit_singleline(&mut shape.value);
+                                    ui.end_row();
 
-                                ui.label("Tekstin sijainti:");
-                                egui::ComboBox::from_id_salt("shape_text_pos_combo")
-                                    .selected_text(match shape.text_position {
-                                        TextPosition::Auto => "Automaattinen",
-                                        TextPosition::Center => "Keskellä sisällä",
-                                        TextPosition::Top => "Yläpuolella",
-                                        TextPosition::Bottom => "Alapuolella",
-                                        TextPosition::Hidden => "Piilotettu",
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut shape.text_position, TextPosition::Auto, "Automaattinen");
-                                        ui.selectable_value(&mut shape.text_position, TextPosition::Center, "Keskellä sisällä");
-                                        ui.selectable_value(&mut shape.text_position, TextPosition::Top, "Yläpuolella");
-                                        ui.selectable_value(&mut shape.text_position, TextPosition::Bottom, "Alapuolella");
-                                        ui.selectable_value(&mut shape.text_position, TextPosition::Hidden, "Piilotettu");
-                                    });
-                                ui.end_row();
+                                    ui.label(lang.tr("Tekstin sijainti:", "Text Position:"));
+                                    egui::ComboBox::from_id_salt("shape_text_pos_combo")
+                                        .selected_text(text_pos_label(shape.text_position, lang))
+                                        .show_ui(ui, |ui| {
+                                            for tp in [
+                                                TextPosition::Auto,
+                                                TextPosition::Center,
+                                                TextPosition::Top,
+                                                TextPosition::Bottom,
+                                                TextPosition::Hidden,
+                                            ] {
+                                                ui.selectable_value(
+                                                    &mut shape.text_position,
+                                                    tp,
+                                                    text_pos_label(tp, lang),
+                                                );
+                                            }
+                                        });
+                                    ui.end_row();
 
-                                ui.label("Tekstin tasaus:");
-                                egui::ComboBox::from_id_salt("shape_text_align_combo")
-                                    .selected_text(match shape.text_align {
-                                        TextAlign::Auto => "Automaattinen",
-                                        TextAlign::Left => "Vasen",
-                                        TextAlign::Center => "Keskitetty",
-                                        TextAlign::Right => "Oikea",
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut shape.text_align, TextAlign::Auto, "Automaattinen");
-                                        ui.selectable_value(&mut shape.text_align, TextAlign::Left, "Vasen");
-                                        ui.selectable_value(&mut shape.text_align, TextAlign::Center, "Keskitetty");
-                                        ui.selectable_value(&mut shape.text_align, TextAlign::Right, "Oikea");
-                                    });
-                                ui.end_row();
+                                    ui.label(lang.tr("Tekstin tasaus:", "Text Alignment:"));
+                                    egui::ComboBox::from_id_salt("shape_text_align_combo")
+                                        .selected_text(text_align_label(shape.text_align, lang))
+                                        .show_ui(ui, |ui| {
+                                            for ta in [
+                                                TextAlign::Auto,
+                                                TextAlign::Left,
+                                                TextAlign::Center,
+                                                TextAlign::Right,
+                                            ] {
+                                                ui.selectable_value(
+                                                    &mut shape.text_align,
+                                                    ta,
+                                                    text_align_label(ta, lang),
+                                                );
+                                            }
+                                        });
+                                    ui.end_row();
 
-                                ui.label("Fonttikoko:");
-                                ui.horizontal(|ui| {
-                                    if shape.font_size <= 0.0 {
-                                        if ui.button("Auto (Oletus)").clicked() {
-                                            shape.font_size = 11.0;
+                                    ui.label(lang.tr("Fonttikoko:", "Font Size:"));
+                                    ui.horizontal(|ui| {
+                                        if shape.font_size <= 0.0 {
+                                            if ui
+                                                .button(lang.tr("Auto (Oletus)", "Auto (Default)"))
+                                                .clicked()
+                                            {
+                                                shape.font_size = 11.0;
+                                            }
+                                            ui.label(egui::RichText::new("Auto").weak());
+                                        } else {
+                                            ui.add(
+                                                egui::DragValue::new(&mut shape.font_size)
+                                                    .speed(0.5)
+                                                    .range(6.0..=72.0)
+                                                    .suffix(" pt"),
+                                            );
+                                            if ui.small_button("Auto").clicked() {
+                                                shape.font_size = 0.0;
+                                            }
                                         }
-                                        ui.label(egui::RichText::new("Auto").weak());
-                                    } else {
-                                        ui.add(
-                                            egui::DragValue::new(&mut shape.font_size)
-                                                .speed(0.5)
-                                                .range(6.0..=72.0)
-                                                .suffix(" pt"),
+                                    });
+                                    ui.end_row();
+
+                                    ui.label(lang.tr("Sijainti X (mm):", "Position X (mm):"));
+                                    ui.add(egui::DragValue::new(&mut shape.x).speed(0.5));
+                                    ui.end_row();
+
+                                    ui.label(lang.tr("Sijainti Y (mm):", "Position Y (mm):"));
+                                    ui.add(egui::DragValue::new(&mut shape.y).speed(0.5));
+                                    ui.end_row();
+
+                                    ui.label(lang.tr("Leveys (mm):", "Width (mm):"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut shape.width)
+                                            .speed(0.5)
+                                            .range(2.0..=2000.0),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label(lang.tr("Korkeus (mm):", "Height (mm):"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut shape.height)
+                                            .speed(0.5)
+                                            .range(2.0..=2000.0),
+                                    );
+                                    ui.end_row();
+
+                                    if scale != DrawingScale::Scale1To1 || shape.is_room_area {
+                                        ui.label(lang.tr("Todellinen koko:", "Real Size:"));
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} × {}",
+                                                scale.format_length(shape.width),
+                                                scale.format_length(shape.height)
+                                            ))
+                                            .strong(),
                                         );
-                                        if ui.small_button("Auto").clicked() {
-                                            shape.font_size = 0.0;
-                                        }
+                                        ui.end_row();
                                     }
-                                });
-                                ui.end_row();
 
-                                ui.label("Sijainti X (mm):");
-                                ui.add(egui::DragValue::new(&mut shape.x).speed(0.5));
-                                ui.end_row();
+                                    if shape.is_room_area {
+                                        ui.label(lang.tr("Huoneen pinta-ala:", "Room Area:"));
+                                        ui.label(
+                                            egui::RichText::new(
+                                                scale.format_area(shape.width, shape.height),
+                                            )
+                                            .color(Color32::from_rgb(2, 132, 199))
+                                            .strong(),
+                                        );
+                                        ui.end_row();
+                                    }
 
-                                ui.label("Sijainti Y (mm):");
-                                ui.add(egui::DragValue::new(&mut shape.y).speed(0.5));
-                                ui.end_row();
-
-                                ui.label("Leveys (mm):");
-                                ui.add(
-                                    egui::DragValue::new(&mut shape.width)
-                                        .speed(0.5)
-                                        .range(2.0..=2000.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Korkeus (mm):");
-                                ui.add(
-                                    egui::DragValue::new(&mut shape.height)
-                                        .speed(0.5)
-                                        .range(2.0..=2000.0),
-                                );
-                                ui.end_row();
-
-                                if scale != DrawingScale::Scale1To1 || shape.is_room_area {
-                                    ui.label("Todellinen koko:");
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{} × {}",
-                                            scale.format_length(shape.width),
-                                            scale.format_length(shape.height)
-                                        ))
-                                        .strong(),
+                                    ui.label(lang.tr("Kierto (°):", "Rotation (°):"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut shape.rotation_deg)
+                                            .speed(5.0)
+                                            .range(0.0..=360.0),
                                     );
                                     ui.end_row();
-                                }
 
-                                if shape.is_room_area {
-                                    ui.label("Huoneen pinta-ala:");
-                                    ui.label(
-                                        egui::RichText::new(
-                                            scale.format_area(shape.width, shape.height),
-                                        )
-                                        .color(Color32::from_rgb(2, 132, 199))
-                                        .strong(),
+                                    ui.label(lang.tr("Viivan paksuus:", "Stroke Width:"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut shape.stroke_width)
+                                            .speed(0.1)
+                                            .range(0.5..=8.0),
                                     );
                                     ui.end_row();
-                                }
 
-                                ui.label("Kierto (°):");
-                                ui.add(
-                                    egui::DragValue::new(&mut shape.rotation_deg)
-                                        .speed(5.0)
-                                        .range(0.0..=360.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Viivan paksuus:");
-                                ui.add(
-                                    egui::DragValue::new(&mut shape.stroke_width)
-                                        .speed(0.1)
-                                        .range(0.5..=8.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Viivaväri:");
-                                ui.horizontal(|ui| {
-                                    let mut sc = Color32::from_rgba_unmultiplied(
-                                        shape.stroke_color[0],
-                                        shape.stroke_color[1],
-                                        shape.stroke_color[2],
-                                        shape.stroke_color[3],
-                                    );
-                                    if ui.color_edit_button_srgba(&mut sc).changed() {
-                                        shape.stroke_color = sc.to_srgba_unmultiplied();
-                                    }
-                                    if shape.stroke_color[3] == 0 {
-                                        if ui.small_button("Näytä viiva").clicked() {
-                                            shape.stroke_color = [148, 163, 184, 180];
-                                            shape.stroke_width = 1.2;
+                                    ui.label(lang.tr("Viivaväri:", "Stroke Color:"));
+                                    ui.horizontal(|ui| {
+                                        let mut sc = Color32::from_rgba_unmultiplied(
+                                            shape.stroke_color[0],
+                                            shape.stroke_color[1],
+                                            shape.stroke_color[2],
+                                            shape.stroke_color[3],
+                                        );
+                                        if ui.color_edit_button_srgba(&mut sc).changed() {
+                                            shape.stroke_color = sc.to_srgba_unmultiplied();
                                         }
-                                    } else if ui.small_button("Ei viivaa").clicked() {
-                                        shape.stroke_color[3] = 0;
-                                    }
-                                });
-                                ui.end_row();
-
-                                ui.label("Täyttöväri:");
-                                ui.horizontal(|ui| {
-                                    let mut fc = Color32::from_rgba_unmultiplied(
-                                        shape.fill_color[0],
-                                        shape.fill_color[1],
-                                        shape.fill_color[2],
-                                        shape.fill_color[3],
-                                    );
-                                    if ui.color_edit_button_srgba(&mut fc).changed() {
-                                        shape.fill_color = fc.to_srgba_unmultiplied();
-                                    }
-                                    if shape.fill_color[3] == 0 {
-                                        if ui.small_button("Valkoinen tausta").clicked() {
-                                            shape.fill_color = [255, 255, 255, 240];
-                                        }
-                                    } else if ui.small_button("Läpinäkyvä").clicked() {
-                                        shape.fill_color = [0, 0, 0, 0];
-                                    }
-                                });
-                                ui.end_row();
-
-                                ui.label("Taso (Layer):");
-                                egui::ComboBox::from_id_salt("shape_layer_combo")
-                                    .selected_text(&shape.layer)
-                                    .show_ui(ui, |ui| {
-                                        for ln in &layer_names {
-                                            ui.selectable_value(&mut shape.layer, ln.clone(), ln);
+                                        if shape.stroke_color[3] == 0 {
+                                            if ui
+                                                .small_button(lang.tr("Näytä viiva", "Show Stroke"))
+                                                .clicked()
+                                            {
+                                                shape.stroke_color = [148, 163, 184, 180];
+                                                shape.stroke_width = 1.2;
+                                            }
+                                        } else if ui
+                                            .small_button(lang.tr("Ei viivaa", "No Stroke"))
+                                            .clicked()
+                                        {
+                                            shape.stroke_color[3] = 0;
                                         }
                                     });
-                                ui.end_row();
+                                    ui.end_row();
 
-                                ui.label("Järjestys (Z-Order):");
-                                ui.horizontal(|ui| {
-                                    if ui
-                                        .small_button("▲▲ Ylimmäksi")
-                                        .on_hover_text("Tuo etualalle (Bring to Front) • Cmd+Shift+]")
-                                        .clicked()
-                                    {
-                                        z_action = Some("front");
-                                    }
-                                    if ui
-                                        .small_button("▲ Eteen")
-                                        .on_hover_text("Siirrä askel eteenpäin (Bring Forward) • Cmd+]")
-                                        .clicked()
-                                    {
-                                        z_action = Some("forward");
-                                    }
-                                    if ui
-                                        .small_button("▼ Taakse")
-                                        .on_hover_text("Siirrä askel taaksepäin (Send Backward) • Cmd+[")
-                                        .clicked()
-                                    {
-                                        z_action = Some("backward");
-                                    }
-                                    if ui
-                                        .small_button("▼▼ Alimmaksi")
-                                        .on_hover_text("Vie taustalle (Send to Back) • Cmd+Shift+[")
-                                        .clicked()
-                                    {
-                                        z_action = Some("back");
-                                    }
+                                    ui.label(lang.tr("Täyttöväri:", "Fill Color:"));
+                                    ui.horizontal(|ui| {
+                                        let mut fc = Color32::from_rgba_unmultiplied(
+                                            shape.fill_color[0],
+                                            shape.fill_color[1],
+                                            shape.fill_color[2],
+                                            shape.fill_color[3],
+                                        );
+                                        if ui.color_edit_button_srgba(&mut fc).changed() {
+                                            shape.fill_color = fc.to_srgba_unmultiplied();
+                                        }
+                                        if shape.fill_color[3] == 0 {
+                                            if ui
+                                                .small_button(
+                                                    lang.tr("Valkoinen tausta", "White Fill"),
+                                                )
+                                                .clicked()
+                                            {
+                                                shape.fill_color = [255, 255, 255, 240];
+                                            }
+                                        } else if ui
+                                            .small_button(lang.tr("Läpinäkyvä", "Transparent"))
+                                            .clicked()
+                                        {
+                                            shape.fill_color = [0, 0, 0, 0];
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label(lang.tr("Taso (Layer):", "Layer:"));
+                                    egui::ComboBox::from_id_salt("shape_layer_combo")
+                                        .selected_text(layer_display_name(&shape.layer, lang))
+                                        .show_ui(ui, |ui| {
+                                            for ln in &layer_names {
+                                                ui.selectable_value(
+                                                    &mut shape.layer,
+                                                    ln.clone(),
+                                                    layer_display_name(ln, lang),
+                                                );
+                                            }
+                                        });
+                                    ui.end_row();
+
+                                    ui.label(lang.tr("Järjestys (Z-Order):", "Z-Order:"));
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .small_button(lang.tr("▲▲ Ylimmäksi", "▲▲ Front"))
+                                            .on_hover_text(lang.tr(
+                                                "Tuo etualalle (Bring to Front) • Cmd+Shift+]",
+                                                "Bring to Front • Cmd+Shift+]",
+                                            ))
+                                            .clicked()
+                                        {
+                                            z_action = Some("front");
+                                        }
+                                        if ui
+                                            .small_button(lang.tr("▲ Eteen", "▲ Forward"))
+                                            .on_hover_text(lang.tr(
+                                                "Siirrä askel eteenpäin (Bring Forward) • Cmd+]",
+                                                "Bring Forward • Cmd+]",
+                                            ))
+                                            .clicked()
+                                        {
+                                            z_action = Some("forward");
+                                        }
+                                        if ui
+                                            .small_button(lang.tr("▼ Taakse", "▼ Backward"))
+                                            .on_hover_text(lang.tr(
+                                                "Siirrä askel taaksepäin (Send Backward) • Cmd+[",
+                                                "Send Backward • Cmd+[",
+                                            ))
+                                            .clicked()
+                                        {
+                                            z_action = Some("backward");
+                                        }
+                                        if ui
+                                            .small_button(lang.tr("▼▼ Alimmaksi", "▼▼ Back"))
+                                            .on_hover_text(lang.tr(
+                                                "Vie taustalle (Send to Back) • Cmd+Shift+[",
+                                                "Send to Back • Cmd+Shift+[",
+                                            ))
+                                            .clicked()
+                                        {
+                                            z_action = Some("back");
+                                        }
+                                    });
+                                    ui.end_row();
                                 });
-                                ui.end_row();
-                            });
 
-                        update_all_connectors(&mut page.connectors, &page.shapes);
+                            update_all_connectors(&mut page.connectors, &page.shapes);
+                        }
                     }
-                }
 
-                if let Some(act) = z_action {
-                    self.push_undo();
-                    match act {
-                        "front" => self.doc.current_page_mut().bring_to_front(sid),
-                        "forward" => self.doc.current_page_mut().bring_forward(sid),
-                        "backward" => self.doc.current_page_mut().send_backward(sid),
-                        "back" => self.doc.current_page_mut().send_to_back(sid),
-                        _ => {}
+                    if let Some(act) = z_action {
+                        self.push_undo();
+                        match act {
+                            "front" => self.doc.current_page_mut().bring_to_front(sid),
+                            "forward" => self.doc.current_page_mut().bring_forward(sid),
+                            "backward" => self.doc.current_page_mut().send_backward(sid),
+                            "back" => self.doc.current_page_mut().send_to_back(sid),
+                            _ => {}
+                        }
                     }
-                }
-            } else if let Some(cid) = self.selected_connector_id {
+                } else if let Some(cid) = self.selected_connector_id {
                     let page = self.doc.current_page_mut();
                     if let Some(conn) = page.connectors.iter_mut().find(|c| c.id == cid) {
-                        ui.label(egui::RichText::new("Johdin / Yhdysviiva").strong());
+                        ui.label(
+                            egui::RichText::new(lang.tr("Johdin / Yhdysviiva", "Wire / Connector"))
+                                .strong(),
+                        );
                         ui.add_space(4.0);
 
                         egui::Grid::new("conn_props_grid")
                             .num_columns(2)
                             .spacing([8.0, 6.0])
                             .show(ui, |ui| {
-                                ui.label("Johdinmerkintä:");
+                                ui.label(lang.tr("Johdinmerkintä:", "Wire Label:"));
                                 ui.text_edit_singleline(&mut conn.label);
                                 ui.end_row();
 
-                                ui.label("Reititystyyli:");
+                                ui.label(lang.tr("Reititystyyli:", "Routing Style:"));
                                 egui::ComboBox::from_id_salt("conn_style_combo")
-                                    .selected_text(match conn.style {
-                                        ConnectorStyle::Orthogonal => "Suorakulmainen 90°",
-                                        ConnectorStyle::Straight => "Suora viiva",
-                                        ConnectorStyle::Curved => "Kaareva (SFS)",
-                                    })
+                                    .selected_text(conn_style_label(conn.style, lang))
                                     .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut conn.style,
+                                        for cs in [
                                             ConnectorStyle::Orthogonal,
-                                            "Suorakulmainen 90°",
-                                        );
-                                        ui.selectable_value(
-                                            &mut conn.style,
                                             ConnectorStyle::Straight,
-                                            "Suora viiva",
-                                        );
-                                        ui.selectable_value(
-                                            &mut conn.style,
                                             ConnectorStyle::Curved,
-                                            "Kaareva (SFS)",
-                                        );
+                                        ] {
+                                            ui.selectable_value(
+                                                &mut conn.style,
+                                                cs,
+                                                conn_style_label(cs, lang),
+                                            );
+                                        }
                                     });
                                 ui.end_row();
 
-                                ui.label("Loppupää:");
+                                ui.label(lang.tr("Loppupää:", "End Marker:"));
                                 egui::ComboBox::from_id_salt("conn_end_arrow")
-                                    .selected_text(match conn.end_arrow {
-                                        ArrowType::None => "Ei merkkiä",
-                                        ArrowType::JunctionDot => "Liitospiste (●)",
-                                        ArrowType::Arrow => "Nuoli (▶)",
-                                        ArrowType::OpenArrow => "Avoin nuoli",
-                                        ArrowType::DimensionTick => "Mittaviiva",
-                                    })
+                                    .selected_text(arrow_type_label(conn.end_arrow, lang))
                                     .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut conn.end_arrow,
+                                        for at in [
                                             ArrowType::None,
-                                            "Ei merkkiä",
-                                        );
-                                        ui.selectable_value(
-                                            &mut conn.end_arrow,
                                             ArrowType::JunctionDot,
-                                            "Liitospiste (●)",
-                                        );
-                                        ui.selectable_value(
-                                            &mut conn.end_arrow,
                                             ArrowType::Arrow,
-                                            "Nuoli (▶)",
-                                        );
+                                        ] {
+                                            ui.selectable_value(
+                                                &mut conn.end_arrow,
+                                                at,
+                                                arrow_type_label(at, lang),
+                                            );
+                                        }
                                     });
                                 ui.end_row();
 
-                                ui.label("Katkoviiva:");
-                                ui.checkbox(&mut conn.dashed, "Katkoviiva (esim. SFS/ohjaus)");
+                                ui.label(lang.tr("Katkoviiva:", "Dashed Line:"));
+                                ui.checkbox(
+                                    &mut conn.dashed,
+                                    lang.tr(
+                                        "Katkoviiva (esim. SFS/ohjaus)",
+                                        "Dashed (e.g. control / SFS)",
+                                    ),
+                                );
                                 ui.end_row();
 
-                                ui.label("Johtimen väri:");
+                                ui.label(lang.tr("Johtimen väri:", "Wire Color:"));
                                 let mut cc = Color32::from_rgba_unmultiplied(
                                     conn.stroke_color[0],
                                     conn.stroke_color[1],
@@ -1338,19 +1665,21 @@ impl PhotonDiagramApp {
                         update_all_connectors(&mut page.connectors, &page.shapes);
                     }
                 } else {
-                    ui.label("Ei valittua kohdetta.");
+                    ui.label(lang.tr("Ei valittua kohdetta.", "No selection."));
                     ui.add_space(6.0);
                     let page = self.doc.current_page_mut();
-                    ui.label(egui::RichText::new("Sivun asetukset").strong());
+                    ui.label(
+                        egui::RichText::new(lang.tr("Sivun asetukset", "Page Settings")).strong(),
+                    );
                     egui::Grid::new("page_props_grid")
                         .num_columns(2)
                         .spacing([8.0, 6.0])
                         .show(ui, |ui| {
-                            ui.label("Sivun nimi:");
+                            ui.label(lang.tr("Sivun nimi:", "Page Name:"));
                             ui.text_edit_singleline(&mut page.name);
                             ui.end_row();
 
-                            ui.label("Leveys (mm):");
+                            ui.label(lang.tr("Leveys (mm):", "Width (mm):"));
                             ui.add(
                                 egui::DragValue::new(&mut page.width_mm)
                                     .speed(1.0)
@@ -1358,7 +1687,7 @@ impl PhotonDiagramApp {
                             );
                             ui.end_row();
 
-                            ui.label("Korkeus (mm):");
+                            ui.label(lang.tr("Korkeus (mm):", "Height (mm):"));
                             ui.add(
                                 egui::DragValue::new(&mut page.height_mm)
                                     .speed(1.0)
@@ -1366,7 +1695,7 @@ impl PhotonDiagramApp {
                             );
                             ui.end_row();
 
-                            ui.label("Ruudukko (mm):");
+                            ui.label(lang.tr("Ruudukko (mm):", "Grid Spacing (mm):"));
                             ui.add(
                                 egui::DragValue::new(&mut page.grid_spacing_mm)
                                     .speed(0.5)
@@ -1379,22 +1708,30 @@ impl PhotonDiagramApp {
                 ui.add_space(10.0);
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.heading("Tasot (Layers)");
+                    ui.heading(lang.tr("Tasot (Layers)", "Layers"));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .button("⬆ Tekstit päällimmäiseksi")
-                            .on_hover_text("Tuo 'Mitat & Tekstit' -taso heti ylimmäksi")
+                            .button(lang.tr("⬆ Tekstit päällimmäiseksi", "⬆ Texts to Top"))
+                            .on_hover_text(lang.tr(
+                                "Tuo 'Mitat & Tekstit' -taso heti ylimmäksi",
+                                "Bring 'Dimensions & Text' layer to the very top",
+                            ))
                             .clicked()
                         {
                             self.push_undo();
-                            self.doc.current_page_mut().bring_layer_to_top("Mitat & Tekstit");
+                            self.doc
+                                .current_page_mut()
+                                .bring_layer_to_top("Mitat & Tekstit");
                         }
                     });
                 });
                 ui.label(
-                    egui::RichText::new("Ylin taso piirretään päällimmäiseksi. Käytä ▲/▼ -painikkeita järjestyksen vaihtoon.")
-                        .small()
-                        .weak(),
+                    egui::RichText::new(lang.tr(
+                        "Ylin taso piirretään päällimmäiseksi. Käytä ▲/▼ -painikkeita järjestyksen vaihtoon.",
+                        "Top layer is drawn on top. Use ▲/▼ buttons to reorder layers.",
+                    ))
+                    .small()
+                    .weak(),
                 );
                 ui.add_space(4.0);
 
@@ -1407,7 +1744,8 @@ impl PhotonDiagramApp {
 
                     for (idx, layer) in page.layers.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
-                            ui.checkbox(&mut layer.visible, "").on_hover_text("Näytä / piilota taso");
+                            ui.checkbox(&mut layer.visible, "")
+                                .on_hover_text(lang.tr("Näytä / piilota taso", "Show / hide layer"));
                             let mut c = Color32::from_rgba_unmultiplied(
                                 layer.color[0],
                                 layer.color[1],
@@ -1417,13 +1755,18 @@ impl PhotonDiagramApp {
                             if ui.color_edit_button_srgba(&mut c).changed() {
                                 layer.color = c.to_srgba_unmultiplied();
                             }
-                            ui.label(egui::RichText::new(&layer.name).strong());
+                            ui.label(
+                                egui::RichText::new(layer_display_name(&layer.name, lang)).strong(),
+                            );
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if idx + 1 < num_layers {
                                     if ui
                                         .small_button("▼")
-                                        .on_hover_text("Siirrä taso alemmas (taustalle)")
+                                        .on_hover_text(lang.tr(
+                                            "Siirrä taso alemmas (taustalle)",
+                                            "Move layer down (background)",
+                                        ))
                                         .clicked()
                                     {
                                         move_down_idx = Some(idx);
@@ -1432,7 +1775,10 @@ impl PhotonDiagramApp {
                                 if idx > 0 {
                                     if ui
                                         .small_button("▲")
-                                        .on_hover_text("Siirrä taso ylemmäs (etualalle)")
+                                        .on_hover_text(lang.tr(
+                                            "Siirrä taso ylemmäs (etualalle)",
+                                            "Move layer up (foreground)",
+                                        ))
                                         .clicked()
                                     {
                                         move_up_idx = Some(idx);
@@ -1803,18 +2149,28 @@ impl PhotonDiagramApp {
                 self.handle_canvas_interactions(&response, origin, hovered_port, mouse_mm);
 
                 // Right-click Context Menu for element & canvas actions
+                let lang = self.lang;
                 response.context_menu(|ui| {
                     if let Some(sid) = self.selected_shape_id {
-                        ui.label(egui::RichText::new("Elementin toiminnot").strong());
+                        ui.label(
+                            egui::RichText::new(lang.tr("Elementin toiminnot", "Element Actions"))
+                                .strong(),
+                        );
                         ui.separator();
-                        if ui.button("Muokkaa tekstiä...").clicked() {
+                        if ui
+                            .button(lang.tr("Muokkaa tekstiä...", "Edit Text..."))
+                            .clicked()
+                        {
                             self.editing_shape_id = Some(sid);
                             self.focus_text_edit = true;
                             ui.close_menu();
                         }
                         ui.separator();
                         if ui
-                            .button("▲▲ Tuo etualalle (Bring to Front)      Cmd+Shift+]")
+                            .button(lang.tr(
+                                "▲▲ Tuo etualalle (Bring to Front)      Cmd+Shift+]",
+                                "▲▲ Bring to Front                      Cmd+Shift+]",
+                            ))
                             .clicked()
                         {
                             self.push_undo();
@@ -1822,7 +2178,10 @@ impl PhotonDiagramApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button("▲ Siirrä eteenpäin (Bring Forward)  Cmd+]")
+                            .button(lang.tr(
+                                "▲ Siirrä eteenpäin (Bring Forward)  Cmd+]",
+                                "▲ Bring Forward                       Cmd+]",
+                            ))
                             .clicked()
                         {
                             self.push_undo();
@@ -1830,7 +2189,10 @@ impl PhotonDiagramApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button("▼ Siirrä taaksepäin (Send Backward) Cmd+[")
+                            .button(lang.tr(
+                                "▼ Siirrä taaksepäin (Send Backward) Cmd+[",
+                                "▼ Send Backward                       Cmd+[",
+                            ))
                             .clicked()
                         {
                             self.push_undo();
@@ -1838,7 +2200,10 @@ impl PhotonDiagramApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button("▼▼ Vie taustalle (Send to Back)        Cmd+Shift+[")
+                            .button(lang.tr(
+                                "▼▼ Vie taustalle (Send to Back)        Cmd+Shift+[",
+                                "▼▼ Send to Back                        Cmd+Shift+[",
+                            ))
                             .clicked()
                         {
                             self.push_undo();
@@ -1846,27 +2211,56 @@ impl PhotonDiagramApp {
                             ui.close_menu();
                         }
                         ui.separator();
-                        if ui.button("Kahdenna (Duplicate)                 Cmd+D").clicked() {
+                        if ui
+                            .button(lang.tr(
+                                "Kahdenna (Duplicate)                 Cmd+D",
+                                "Duplicate                            Cmd+D",
+                            ))
+                            .clicked()
+                        {
                             self.duplicate_selected();
                             ui.close_menu();
                         }
-                        if ui.button("Kierrä 90°                           R").clicked() {
+                        if ui
+                            .button(lang.tr(
+                                "Kierrä 90°                           R",
+                                "Rotate 90°                           R",
+                            ))
+                            .clicked()
+                        {
                             self.rotate_selected(90.0);
                             ui.close_menu();
                         }
-                        if ui.button("Poista                              Del").clicked() {
+                        if ui
+                            .button(lang.tr(
+                                "Poista                              Del",
+                                "Delete                              Del",
+                            ))
+                            .clicked()
+                        {
                             self.delete_selected();
                             ui.close_menu();
                         }
                     } else {
-                        ui.label(egui::RichText::new("Kaavion toiminnot").strong());
+                        ui.label(
+                            egui::RichText::new(lang.tr("Kaavion toiminnot", "Canvas Actions"))
+                                .strong(),
+                        );
                         ui.separator();
-                        if ui.button("Lisää tekstilaatikko tähän").clicked() {
+                        if ui
+                            .button(lang.tr(
+                                "Lisää tekstilaatikko tähän",
+                                "Add Text Box Here",
+                            ))
+                            .clicked()
+                        {
                             if let Some(mp) = mouse_mm {
                                 self.push_undo();
                                 let id = self.doc.alloc_id();
                                 let count = self.doc.current_page().shapes.len() + 1;
-                                if let Some(mut sh) = instantiate_shape("note_textbox", id, mp.x, mp.y, count) {
+                                if let Some(mut sh) =
+                                    instantiate_shape("note_textbox", id, mp.x, mp.y, count)
+                                {
                                     sh.label.clear();
                                     self.doc.current_page_mut().shapes.push(sh);
                                     self.selected_shape_id = Some(id);
@@ -1876,12 +2270,23 @@ impl PhotonDiagramApp {
                             }
                             ui.close_menu();
                         }
-                        if ui.button("Lisää huomautuskupla (Callout)").clicked() {
+                        if ui
+                            .button(lang.tr(
+                                "Lisää huomautuskupla (Callout)",
+                                "Add Callout Bubble",
+                            ))
+                            .clicked()
+                        {
                             if let Some(mp) = mouse_mm {
                                 self.push_undo();
                                 let id = self.doc.alloc_id();
                                 let count = self.doc.current_page().shapes.len() + 1;
-                                if let Some(sh) = instantiate_shape("note_callout", id, mp.x, mp.y, count) {
+                                if let Some(mut sh) =
+                                    instantiate_shape("note_callout", id, mp.x, mp.y, count)
+                                {
+                                    if lang == UiLang::En {
+                                        sh.label = "Note".to_string();
+                                    }
                                     self.doc.current_page_mut().shapes.push(sh);
                                     self.selected_shape_id = Some(id);
                                     self.editing_shape_id = Some(id);
@@ -1891,12 +2296,23 @@ impl PhotonDiagramApp {
                             ui.close_menu();
                         }
                         ui.separator();
-                        if ui.button("⬆ Tuo tekstit päällimmäiseksi").clicked() {
+                        if ui
+                            .button(lang.tr(
+                                "⬆ Tuo tekstit päällimmäiseksi",
+                                "⬆ Bring Texts to Top",
+                            ))
+                            .clicked()
+                        {
                             self.push_undo();
-                            self.doc.current_page_mut().bring_layer_to_top("Mitat & Tekstit");
+                            self.doc
+                                .current_page_mut()
+                                .bring_layer_to_top("Mitat & Tekstit");
                             ui.close_menu();
                         }
-                        if ui.button("Nollaa zoomi (100%)").clicked() {
+                        if ui
+                            .button(lang.tr("Nollaa zoomi (100%)", "Reset Zoom (100%)"))
+                            .clicked()
+                        {
                             self.zoom_px_per_mm = 3.78;
                             self.pan_offset = Vec2::ZERO;
                             ui.close_menu();
@@ -1907,6 +2323,7 @@ impl PhotonDiagramApp {
     }
 
     fn render_text_edit_dialog(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
         if let Some(edit_id) = self.editing_shape_id {
             let shape_info = self
                 .doc
@@ -1914,12 +2331,15 @@ impl PhotonDiagramApp {
                 .shapes
                 .iter()
                 .find(|s| s.id == edit_id)
-                .map(|s| (s.name.clone(), Point::new(s.x, s.y)));
+                .map(|s| {
+                    let disp = stencil_display_name(&s.stencil_id, &s.name, lang).to_string();
+                    (disp, Point::new(s.x, s.y))
+                });
 
             let mut close_editor = false;
             if let Some((name, center_pt)) = shape_info {
                 let center_sp = self.page_to_screen(self.canvas_origin, center_pt);
-                let title = format!("Muokkaa tekstiä: {}", name);
+                let title = format!("{}: {}", lang.tr("Muokkaa tekstiä", "Edit Text"), name);
                 let mut is_open = true;
 
                 let page = self.doc.current_page_mut();
@@ -1941,9 +2361,12 @@ impl PhotonDiagramApp {
                         .show(ctx, |ui| {
                             ui.add_space(2.0);
                             ui.label(
-                                egui::RichText::new("Kirjoita laatikon tai muodon teksti:")
-                                    .small()
-                                    .color(Color32::from_rgb(100, 116, 139)),
+                                egui::RichText::new(lang.tr(
+                                    "Kirjoita laatikon tai muodon teksti:",
+                                    "Enter text for the box or shape:",
+                                ))
+                                .small()
+                                .color(Color32::from_rgb(100, 116, 139)),
                             );
 
                             let te = egui::TextEdit::multiline(&mut shape.label)
@@ -1951,7 +2374,7 @@ impl PhotonDiagramApp {
                                 .desired_width(f32::INFINITY)
                                 .desired_rows(rows)
                                 .cursor_at_end(true)
-                                .hint_text("Kirjoita teksti...");
+                                .hint_text(lang.tr("Kirjoita teksti...", "Enter text..."));
                             let te_res = ui.add(te);
 
                             if self.focus_text_edit {
@@ -1959,18 +2382,18 @@ impl PhotonDiagramApp {
                                 self.focus_text_edit = false;
                             }
 
-                            // Shortcuts:
-                            // Escape = Valmis / Sulje
-                            // For notes: Cmd/Ctrl+Enter = Valmis; Enter = Uusi rivi
-                            // For other shapes: Enter = Valmis (unless Shift is held)
                             if ui.input(|i| i.key_pressed(Key::Escape)) {
                                 close_editor = true;
                             } else if is_note {
-                                if ui.input(|i| i.key_pressed(Key::Enter) && (i.modifiers.command || i.modifiers.ctrl)) {
+                                if ui.input(|i| {
+                                    i.key_pressed(Key::Enter)
+                                        && (i.modifiers.command || i.modifiers.ctrl)
+                                }) {
                                     shape.label = shape.label.trim_end_matches('\n').to_string();
                                     close_editor = true;
                                 }
-                            } else if ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift) {
+                            } else if ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift)
+                            {
                                 shape.label = shape.label.trim_end_matches('\n').to_string();
                                 close_editor = true;
                             }
@@ -1978,26 +2401,36 @@ impl PhotonDiagramApp {
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
                                 if ui
-                                    .button(egui::RichText::new(" Valmis (OK) ").strong())
+                                    .button(
+                                        egui::RichText::new(
+                                            lang.tr(" Valmis (OK) ", " Done (OK) "),
+                                        )
+                                        .strong(),
+                                    )
                                     .clicked()
                                 {
                                     close_editor = true;
                                 }
-                                if ui.button("Tyhjennä").clicked() {
+                                if ui.button(lang.tr("Tyhjennä", "Clear")).clicked() {
                                     shape.label.clear();
                                 }
                                 let hint = if is_note {
-                                    "Cmd+Enter = Valmis • Enter = Rivi"
+                                    lang.tr(
+                                        "Cmd+Enter = Valmis • Enter = Rivi",
+                                        "Cmd+Enter = Done • Enter = New Line",
+                                    )
                                 } else {
-                                    "Enter = Valmis • Shift+Enter = Rivi"
+                                    lang.tr(
+                                        "Enter = Valmis • Shift+Enter = Rivi",
+                                        "Enter = Done • Shift+Enter = New Line",
+                                    )
                                 };
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(
-                                        egui::RichText::new(hint)
-                                            .weak()
-                                            .small(),
-                                    );
-                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(egui::RichText::new(hint).weak().small());
+                                    },
+                                );
                             });
                         });
                 }
@@ -2066,11 +2499,13 @@ impl PhotonDiagramApp {
                 if let Some(st) = self.stencils.iter().find(|s| s.id == st_id) {
                     let shape = st.instantiate(new_id, snapped.x, snapped.y, count);
                     self.doc.current_page_mut().shapes.push(shape);
+                    translate_document_template_strings(&mut self.doc, self.lang);
                     self.select_single_shape(new_id);
                 } else if let Some(shape) =
                     instantiate_shape(&st_id, new_id, snapped.x, snapped.y, count)
                 {
                     self.doc.current_page_mut().shapes.push(shape);
+                    translate_document_template_strings(&mut self.doc, self.lang);
                     self.select_single_shape(new_id);
                 }
                 // Keep stencil armed only if Shift is held; otherwise return to Select tool
@@ -2266,7 +2701,16 @@ impl PhotonDiagramApp {
                         self.select_shapes(hit_ids);
                     }
                     if !self.selected_shape_ids.is_empty() {
-                        self.status_msg = format!("Valittu {} komponenttia.", self.selected_shape_ids.len());
+                        self.status_msg = match self.lang {
+                            UiLang::Fi => format!(
+                                "Valittu {} komponenttia.",
+                                self.selected_shape_ids.len()
+                            ),
+                            UiLang::En => format!(
+                                "Selected {} components.",
+                                self.selected_shape_ids.len()
+                            ),
+                        };
                     }
                 }
             }
@@ -2347,7 +2791,10 @@ impl PhotonDiagramApp {
                     update_all_connectors(&mut page.connectors, &page.shapes);
                     self.selected_connector_id = Some(cid);
                     self.selected_shape_id = None;
-                    self.status_msg = "Johdin kytketty.".to_string();
+                    self.status_msg = self
+                        .lang
+                        .tr("Johdin kytketty.", "Wire connected.")
+                        .to_string();
                 }
             }
 
@@ -2405,6 +2852,7 @@ impl PhotonDiagramApp {
                             sh.height = h.max(4.0);
                         }
                         self.doc.current_page_mut().shapes.push(sh);
+                        translate_document_template_strings(&mut self.doc, self.lang);
                         self.select_single_shape(id);
                         self.active_tool = ActiveTool::Select;
                     }
@@ -2829,7 +3277,7 @@ impl PhotonDiagramApp {
             painter.text(
                 sp,
                 egui::Align2::CENTER_CENTER,
-                "Kirjoita tekstiä...",
+                self.lang.tr("Kirjoita tekstiä...", "Enter text..."),
                 FontId::proportional((10.0 * 0.3528 * self.zoom_px_per_mm).clamp(9.0, 14.0)),
                 Color32::from_rgba_unmultiplied(148, 163, 184, 180),
             );

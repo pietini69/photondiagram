@@ -3,6 +3,7 @@
 use eframe::egui;
 use photon_diagram::formats::load_document_from_path;
 use photon_diagram::gui::PhotonDiagramApp;
+use photon_diagram::i18n::UiLang;
 use std::path::PathBuf;
 
 fn main() -> eframe::Result<()> {
@@ -10,11 +11,12 @@ fn main() -> eframe::Result<()> {
 
     let icon_bytes = include_bytes!("../assets/icon_512.png");
     let icon_data = eframe::icon_data::from_png_bytes(icon_bytes).ok();
+    let initial_lang = UiLang::detect_system();
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1480.0, 920.0])
         .with_min_inner_size([960.0, 620.0])
-        .with_title("PhotonDiagram — Sähkökaaviot, Pohjapiirustukset & Kaavio-CAD (.vsdx/.vdx/.vsd)");
+        .with_title(initial_lang.window_title());
 
     if let Some(icon) = icon_data {
         viewport = viewport.with_icon(icon);
