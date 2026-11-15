@@ -2534,16 +2534,19 @@ impl PhotonDiagramApp {
                     start_deg,
                     sweep_deg,
                 } => {
-                    let steps = 16;
-                    let mut pts = Vec::with_capacity(steps + 1);
+                    let steps = 20;
+                    let mut prev: Option<Pos2> = None;
                     for i in 0..=steps {
                         let t = i as f64 / steps as f64;
                         let ang = (start_deg + sweep_deg * t) * PI / 180.0;
                         let lx = cx + rx * ang.cos();
                         let ly = cy + ry * ang.sin();
-                        pts.push(self.page_to_screen(origin, shape.local_to_page(lx, ly)));
+                        let cur = self.page_to_screen(origin, shape.local_to_page(lx, ly));
+                        if let Some(p0) = prev {
+                            painter.line_segment([p0, cur], stroke);
+                        }
+                        prev = Some(cur);
                     }
-                    painter.add(Shape::line(pts, stroke));
                 }
                 PrimOp::Polyline {
                     points,
@@ -3129,15 +3132,18 @@ fn draw_stencil_mini_preview(painter: &egui::Painter, rect: Rect, item: &Stencil
                 sweep_deg,
             } => {
                 let steps = 16;
-                let mut pts = Vec::with_capacity(steps + 1);
+                let mut prev: Option<Pos2> = None;
                 for i in 0..=steps {
                     let t = i as f64 / steps as f64;
                     let ang = (start_deg + sweep_deg * t) * PI / 180.0;
                     let lx = cx + rx * ang.cos();
                     let ly = cy + ry * ang.sin();
-                    pts.push(map(lx, ly));
+                    let cur = map(lx, ly);
+                    if let Some(p0) = prev {
+                        painter.line_segment([p0, cur], stroke);
+                    }
+                    prev = Some(cur);
                 }
-                painter.add(Shape::line(pts, stroke));
             }
             PrimOp::Polyline { points, closed, filled } => {
                 let pts: Vec<Pos2> = points.iter().map(|(x, y)| map(*x, *y)).collect();
