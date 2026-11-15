@@ -454,19 +454,25 @@ pub fn builtin_stencils() -> Vec<StencilItem> {
             ports: vec![
                 ConnectionPort::new("A1 (Kela +)", 0.0, 0.25, PortDir::Left),
                 ConnectionPort::new("A2 (Kela -)", 0.0, 0.75, PortDir::Left),
-                ConnectionPort::new("COM (Yhteinen)", 0.6, 1.0, PortDir::Down),
-                ConnectionPort::new("NO (Sulkeutuva)", 1.0, 0.3, PortDir::Right),
-                ConnectionPort::new("NC (Avautuva)", 1.0, 0.7, PortDir::Right),
+                ConnectionPort::new("COM (Yhteinen)", 0.62, 0.0, PortDir::Up),
+                ConnectionPort::new("NO (Sulkeutuva)", 1.0, 0.35, PortDir::Right),
+                ConnectionPort::new("NC (Avautuva)", 1.0, 0.75, PortDir::Right),
             ],
             geometry: vec![
+                // IEC relay coil rectangle with diagonal coil symbol line
                 PrimOp::Rect { x: 0.12, y: 0.15, w: 0.26, h: 0.7, filled: true },
+                PrimOp::Line { x1: 0.12, y1: 0.72, x2: 0.38, y2: 0.28 },
                 PrimOp::Line { x1: 0.0, y1: 0.25, x2: 0.12, y2: 0.25 },
                 PrimOp::Line { x1: 0.0, y1: 0.75, x2: 0.12, y2: 0.75 },
-                PrimOp::Line { x1: 0.38, y1: 0.5, x2: 0.65, y2: 0.5 },
-                PrimOp::Line { x1: 0.6, y1: 1.0, x2: 0.6, y2: 0.6 },
-                PrimOp::Line { x1: 0.6, y1: 0.6, x2: 0.85, y2: 0.3 },
-                PrimOp::Line { x1: 0.85, y1: 0.3, x2: 1.0, y2: 0.3 },
-                PrimOp::Line { x1: 0.85, y1: 0.7, x2: 1.0, y2: 0.7 },
+                // Dashed mechanical linkage between coil and contact
+                PrimOp::Line { x1: 0.41, y1: 0.5, x2: 0.48, y2: 0.5 },
+                PrimOp::Line { x1: 0.53, y1: 0.5, x2: 0.60, y2: 0.5 },
+                PrimOp::Line { x1: 0.65, y1: 0.5, x2: 0.71, y2: 0.5 },
+                // Contact common from top, moving blade, and NO/NC terminals
+                PrimOp::Line { x1: 0.62, y1: 0.0, x2: 0.62, y2: 0.45 },
+                PrimOp::Line { x1: 0.62, y1: 0.45, x2: 0.85, y2: 0.68 },
+                PrimOp::Line { x1: 0.85, y1: 0.35, x2: 1.0, y2: 0.35 },
+                PrimOp::Line { x1: 0.85, y1: 0.75, x2: 1.0, y2: 0.75 },
             ],
             is_dimension: false,
             is_room_area: false,

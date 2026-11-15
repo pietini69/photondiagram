@@ -157,13 +157,35 @@ fn compute_connector_path_avoiding(
                 obstacles.push(obs);
             }
 
+            // Also add short outward corridors in front of all OTHER ports on all shapes so a wire
+            // exiting e.g. Q2 doesn't turn straight down 5mm in front of Q3 and GND!
+            let mut all_segments = routed_segments.to_vec();
+            for s in shapes {
+                if s.is_room_area || s.is_dimension {
+                    continue;
+                }
+                for p_idx in 0..s.ports.len() {
+                    if (Some(s.id) == conn.from_shape && p_idx == conn.from_port)
+                        || (Some(s.id) == conn.to_shape && p_idx == conn.to_port)
+                    {
+                        continue;
+                    }
+                    let (p_pos, p_dir) = s.port_world_pos_and_dir(p_idx);
+                    let r_dir = resolve_port_dir(s, p_pos, p_dir);
+                    if r_dir != (0.0, 0.0) {
+                        let p_ext = Point::new(p_pos.x + r_dir.0 * 9.0, p_pos.y + r_dir.1 * 9.0);
+                        all_segments.push((p_pos, p_ext, Some(s.id), p_idx, None, 0));
+                    }
+                }
+            }
+
             let mid_path = route_orthogonal_astar(
                 s_out,
                 e_out,
                 start_dir,
                 end_dir,
                 &obstacles,
-                routed_segments,
+                &all_segments,
                 conn.from_shape,
                 conn.from_port,
                 conn.to_shape,
@@ -673,58 +695,36 @@ pub fn resolve_clean_label_position(
         return base;
     }
 
-    // Try candidate offsets around the component so the label never sits under a wire
-    let candidates = [
-        // Opposite vertical side (Bottom vs Top)
-        (
-            Point::new(
-                shape.x,
-                if is_top {
-                    bb.max_y + 2.8
-                } else {
-                    bb.min_y - 2.8
-                },
-            ),
-            !is_top,
-        ),
-        // Shifted left of the vertical wire
-        (Point::new(bb.min_x - half_w - 2.0, shape.y), false),
-        // Shifted right of the vertical wire
-        (Point::new(bb.max_x + half_w + 2.0, shape.y), false),
-        // Shifted top-left
-        (Point::new(bb.min_x - half_w * 0.7, bb.min_y - 2.6), true),
-        // Shifted top-right
-        (Point::new(bb.max_x + half_w * 0.7, bb.min_y - 2.6), true),
-        // Higher above / lower below
-        (
-            Point::new(
-                shape.x,
-                if is_top {
-                    bb.min_y - 7.0
-                } else {
-                    bb.max_y + 7.0
-                },
-            ),
-            is_top,
-        ),
-    ];
+    // Try flipping to opposite vertical side (Top <-> Bottom) so the label stays strictly
+    // aligned with its own component and never jumps horizontally onto an adjacent component!
+    let opp_pt = Point::new(
+        shape.x,
+        if is_top {
+            bb.max_y + 2.8
+        } else {
+            bb.min_y - 2.8
+        },
+    );
+    let opp_box = box_for(opp_pt, !is_top);
+    let opp_hits = count_hits(&opp_box);
+    if opp_hits == 0 {
+        return opp_pt;
+    }
 
-    let mut best_pt = base;
-    let mut best_hits = count_hits(&base_box);
-
-    for (cand_pt, cand_top) in candidates {
-        let cbox = box_for(cand_pt, cand_top);
-        let h = count_hits(&cbox);
-        if h == 0 {
-            return cand_pt;
-        }
-        if h < best_hits {
-            best_hits = h;
-            best_pt = cand_pt;
+    // For vertical-pin voltage sources (DC/AC source where pins are at Top and Bottom),
+    // place label cleanly to the left or right of the circle
+    if shape.stencil_id.contains("dc_source") || shape.stencil_id.contains("ac_source") {
+        let left_pt = Point::new(bb.min_x - half_w - 2.0, shape.y);
+        if count_hits(&box_for(left_pt, false)) == 0 {
+            return left_pt;
         }
     }
 
-    best_pt
+    if opp_hits < count_hits(&base_box) {
+        opp_pt
+    } else {
+        base
+    }
 }
 
 /// Represents a wire crossing where a horizontal wire segment crosses over a vertical wire segment

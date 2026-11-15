@@ -103,24 +103,24 @@ pub fn template_electrical_schematic() -> DiagramDocument {
     // +24V feed (Red)
     add_wire(g1_id, 0, f1_id, 0, [220, 38, 38, 255], "+24V", false);
     add_wire(f1_id, 1, s1_id, 0, [220, 38, 38, 255], "", true);
-    add_wire(s1_id, 1, plc_id, 0, [220, 38, 38, 255], "IN1", false);
-    // Branch from F1 output to K1 switch common (Port 2 = C)
-    add_wire(f1_id, 1, k1_id, 2, [220, 38, 38, 255], "Päävirta", false);
+    add_wire(s1_id, 1, plc_id, 0, [220, 38, 38, 255], "", false);
+    // Branch from F1 output to K1 switch common (Port 2 = COM)
+    add_wire(f1_id, 1, k1_id, 2, [220, 38, 38, 255], "", false);
 
     // PLC outputs (Blue control wires)
-    add_wire(plc_id, 4, k1_id, 0, [37, 99, 235, 255], "Q1 (Kela)", false);
-    add_wire(plc_id, 5, r1_id, 0, [37, 99, 235, 255], "Q2 (Merkki)", false);
+    add_wire(plc_id, 4, k1_id, 0, [37, 99, 235, 255], "", false);
+    add_wire(plc_id, 5, r1_id, 0, [37, 99, 235, 255], "", false);
     add_wire(r1_id, 1, led1_id, 0, [37, 99, 235, 255], "", false);
 
     // Relay NO contact (Port 3) to Motor M1 (Port 0)
-    add_wire(k1_id, 3, m1_id, 0, [220, 38, 38, 255], "M1+", false);
+    add_wire(k1_id, 3, m1_id, 0, [220, 38, 38, 255], "", false);
 
     // Return / 0V GND wires (Dark slate)
-    add_wire(g1_id, 1, gnd1_id, 0, [30, 41, 59, 255], "0V", false);
+    add_wire(g1_id, 1, gnd1_id, 0, [30, 41, 59, 255], "", false);
     add_wire(k1_id, 1, gnd2_id, 0, [30, 41, 59, 255], "", true);
     add_wire(led1_id, 1, gnd2_id, 0, [30, 41, 59, 255], "", true);
     add_wire(m1_id, 3, gnd2_id, 0, [30, 41, 59, 255], "", true);
-    add_wire(m1_id, 1, pe1_id, 0, [22, 163, 74, 255], "PE", false);
+    add_wire(m1_id, 1, pe1_id, 0, [22, 163, 74, 255], "", false);
 
     update_all_connectors(&mut page.connectors, &page.shapes);
     doc.pages = vec![page];
