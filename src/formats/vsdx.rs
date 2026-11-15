@@ -1392,6 +1392,39 @@ fn build_visio_shapes_and_connects_xml(page: &DiagramPage) -> String {
                         }
                     }
                 }
+                PrimOp::Circle { cx, cy, r, .. } => {
+                    let ecx = cx * w_in;
+                    let ecy = (1.0 - cy) * h_in;
+                    let erx = r * w_in;
+                    let ery = r * h_in;
+                    out.push_str(&format!(
+                        "        <Row T=\"Ellipse\" IX=\"{}\"><Cell N=\"X\" V=\"{:.4}\"/><Cell N=\"Y\" V=\"{:.4}\"/><Cell N=\"A\" V=\"{:.4}\"/><Cell N=\"B\" V=\"{:.4}\"/><Cell N=\"C\" V=\"{:.4}\"/><Cell N=\"D\" V=\"{:.4}\"/></Row>\n",
+                        row_ix, ecx, ecy, ecx + erx, ecy, ecx, ecy + ery
+                    ));
+                    row_ix += 1;
+                }
+                PrimOp::Arc {
+                    cx,
+                    cy,
+                    rx,
+                    ry,
+                    start_deg,
+                    sweep_deg,
+                } => {
+                    let steps = 16;
+                    for i in 0..=steps {
+                        let t = i as f64 / steps as f64;
+                        let ang = (start_deg + sweep_deg * t) * std::f64::consts::PI / 180.0;
+                        let px = (cx + rx * ang.cos()) * w_in;
+                        let py = (1.0 - (cy + ry * ang.sin())) * h_in;
+                        let rtype = if i == 0 { "MoveTo" } else { "LineTo" };
+                        out.push_str(&format!(
+                            "        <Row T=\"{}\" IX=\"{}\"><Cell N=\"X\" V=\"{:.4}\"/><Cell N=\"Y\" V=\"{:.4}\"/></Row>\n",
+                            rtype, row_ix, px, py
+                        ));
+                        row_ix += 1;
+                    }
+                }
                 PrimOp::Ellipse { cx, cy, rx, ry, .. } => {
                     let ecx = cx * w_in;
                     let ecy = (1.0 - cy) * h_in;

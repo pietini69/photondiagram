@@ -346,7 +346,31 @@ fn export_shape_lbrn2(page: &DiagramPage, shape: &DiagramShape, out: &mut String
                 out.push_str("        <PrimList>L0 1</PrimList>\n");
                 out.push_str("    </Shape>\n");
             }
-            PrimOp::Arc { .. } => {}
+            PrimOp::Arc {
+                cx,
+                cy,
+                rx,
+                ry,
+                start_deg,
+                sweep_deg,
+            } => {
+                has_exported_geometry = true;
+                let steps = 16;
+                out.push_str("    <Shape Type=\"Path\" CutIndex=\"0\">\n");
+                out.push_str("        <XForm>1 0 0 1 0 0</XForm>\n");
+                out.push_str("        <VertList>");
+                for i in 0..=steps {
+                    let t = i as f64 / steps as f64;
+                    let ang = (start_deg + sweep_deg * t) * std::f64::consts::PI / 180.0;
+                    let pt = shape.local_to_page(cx + rx * ang.cos(), cy + ry * ang.sin());
+                    out.push_str(&format!("V{:.3} {:.3}c0x1c1x1", pt.x, pt.y));
+                }
+                out.push_str("</VertList>\n        <PrimList>");
+                for i in 0..steps {
+                    out.push_str(&format!("L{} {}", i, i + 1));
+                }
+                out.push_str("</PrimList>\n    </Shape>\n");
+            }
         }
     }
 

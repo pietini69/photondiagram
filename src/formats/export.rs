@@ -416,6 +416,25 @@ pub fn export_page_dxf(page: &DiagramPage) -> String {
                         write_dxf_line(&mut dxf, &layer, a.x, h_page - a.y, b.x, h_page - b.y);
                     }
                 }
+                PrimOp::Arc {
+                    cx,
+                    cy,
+                    rx,
+                    ry,
+                    start_deg,
+                    sweep_deg,
+                } => {
+                    let steps = 16;
+                    for i in 0..steps {
+                        let t0 = i as f64 / steps as f64;
+                        let t1 = (i + 1) as f64 / steps as f64;
+                        let a0 = (start_deg + sweep_deg * t0) * PI / 180.0;
+                        let a1 = (start_deg + sweep_deg * t1) * PI / 180.0;
+                        let p0 = shape.local_to_page(cx + rx * a0.cos(), cy + ry * a0.sin());
+                        let p1 = shape.local_to_page(cx + rx * a1.cos(), cy + ry * a1.sin());
+                        write_dxf_line(&mut dxf, &layer, p0.x, h_page - p0.y, p1.x, h_page - p1.y);
+                    }
+                }
                 PrimOp::Ellipse { cx, cy, rx, ry, .. } => {
                     let c = shape.local_to_page(*cx, *cy);
                     let rad = (*rx + *ry) * 0.5 * (shape.width + shape.height) * 0.5;

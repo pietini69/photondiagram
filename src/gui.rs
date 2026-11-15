@@ -3120,6 +3120,25 @@ fn draw_stencil_mini_preview(painter: &egui::Painter, rect: Rect, item: &Stencil
                 painter.circle_filled(map(*cx, *cy), rad, f);
                 painter.circle_stroke(map(*cx, *cy), rad, stroke);
             }
+            PrimOp::Arc {
+                cx,
+                cy,
+                rx,
+                ry,
+                start_deg,
+                sweep_deg,
+            } => {
+                let steps = 16;
+                let mut pts = Vec::with_capacity(steps + 1);
+                for i in 0..=steps {
+                    let t = i as f64 / steps as f64;
+                    let ang = (start_deg + sweep_deg * t) * PI / 180.0;
+                    let lx = cx + rx * ang.cos();
+                    let ly = cy + ry * ang.sin();
+                    pts.push(map(lx, ly));
+                }
+                painter.add(Shape::line(pts, stroke));
+            }
             PrimOp::Polyline { points, closed, filled } => {
                 let pts: Vec<Pos2> = points.iter().map(|(x, y)| map(*x, *y)).collect();
                 let f = if *filled {
