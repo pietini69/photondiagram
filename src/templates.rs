@@ -37,25 +37,25 @@ pub fn template_electrical_schematic() -> DiagramDocument {
     plc.label = "PLC1 (Ohjauslogiikka)".to_string();
     plc.value = "24VDC I/O".to_string();
 
-    let mut k1 = instantiate_shape("iec_relay", doc.alloc_id(), 225.0, 75.0, 1).unwrap();
+    let mut k1 = instantiate_shape("iec_relay", doc.alloc_id(), 220.0, 72.0, 1).unwrap();
     k1.label = "K1".to_string();
     k1.value = "24V / 16A".to_string();
 
-    let mut r1 = instantiate_shape("iec_resistor", doc.alloc_id(), 225.0, 120.0, 1).unwrap();
+    let mut r1 = instantiate_shape("iec_resistor", doc.alloc_id(), 215.0, 130.0, 1).unwrap();
     r1.label = "R1".to_string();
     r1.value = "1.2 kΩ".to_string();
 
-    let mut led1 = instantiate_shape("iec_led", doc.alloc_id(), 260.0, 120.0, 1).unwrap();
+    let mut led1 = instantiate_shape("iec_led", doc.alloc_id(), 250.0, 130.0, 1).unwrap();
     led1.label = "H1 (Tila-LED)".to_string();
     led1.value = "Vihreä".to_string();
 
-    let mut m1 = instantiate_shape("iec_motor", doc.alloc_id(), 265.0, 68.0, 1).unwrap();
+    let mut m1 = instantiate_shape("iec_motor", doc.alloc_id(), 262.0, 65.0, 1).unwrap();
     m1.label = "M1".to_string();
     m1.value = "1.5 kW".to_string();
 
-    let gnd1 = instantiate_shape("iec_gnd", doc.alloc_id(), 35.0, 155.0, 1).unwrap();
-    let gnd2 = instantiate_shape("iec_gnd", doc.alloc_id(), 265.0, 155.0, 2).unwrap();
-    let pe1 = instantiate_shape("iec_pe", doc.alloc_id(), 282.0, 105.0, 1).unwrap();
+    let gnd1 = instantiate_shape("iec_gnd", doc.alloc_id(), 35.0, 160.0, 1).unwrap();
+    let gnd2 = instantiate_shape("iec_gnd", doc.alloc_id(), 262.0, 168.0, 2).unwrap();
+    let pe1 = instantiate_shape("iec_pe", doc.alloc_id(), 284.0, 98.0, 1).unwrap();
 
     let g1_id = g1.id;
     let f1_id = f1.id;
@@ -119,7 +119,7 @@ pub fn template_electrical_schematic() -> DiagramDocument {
     add_wire(g1_id, 1, gnd1_id, 0, [30, 41, 59, 255], "0V", false);
     add_wire(k1_id, 1, gnd2_id, 0, [30, 41, 59, 255], "", true);
     add_wire(led1_id, 1, gnd2_id, 0, [30, 41, 59, 255], "", true);
-    add_wire(m1_id, 1, gnd2_id, 0, [30, 41, 59, 255], "", true);
+    add_wire(m1_id, 3, gnd2_id, 0, [30, 41, 59, 255], "", true);
     add_wire(m1_id, 1, pe1_id, 0, [22, 163, 74, 255], "PE", false);
 
     update_all_connectors(&mut page.connectors, &page.shapes);

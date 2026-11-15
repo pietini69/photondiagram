@@ -1,5 +1,7 @@
 use crate::model::{ArrowType, DiagramDocument, DiagramPage, DiagramShape, Point, PrimOp};
-use crate::routing::find_wire_jumps;
+use crate::routing::{
+    connector_label_position_smart, find_wire_jumps, resolve_clean_label_position,
+};
 use std::f64::consts::PI;
 
 /// Exports a `DiagramPage` to a standalone, print-ready `.svg` vector document.
@@ -110,22 +112,38 @@ pub fn export_page_svg(page: &DiagramPage, show_jumps: bool) -> String {
         }
 
         if !conn.label.is_empty() && pts.len() >= 2 {
-            let mid = pts[pts.len() / 2 - 1].midpoint(pts[pts.len() / 2]);
+            let half_w = (conn.label.chars().count() as f64 * 0.95).clamp(4.0, 18.0);
+            let lpt =
+                connector_label_position_smart(pts, &page.connectors, &page.shapes, half_w);
             svg.push_str(&format!(
-                "  <text x=\"{:.2}\" y=\"{:.2}\" font-family=\"sans-serif\" font-size=\"2.8\" fill=\"{}\" text-anchor=\"middle\">{}</text>\n",
-                mid.x,
-                mid.y - 1.2,
+                "  <rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"3.8\" rx=\"0.8\" fill=\"#ffffff\" fill-opacity=\"0.92\"/>\n",
+                lpt.x - half_w,
+                lpt.y - 2.0,
+                half_w * 2.0
+            ));
+            svg.push_str(&format!(
+                "  <text x=\"{:.2}\" y=\"{:.2}\" font-family=\"sans-serif\" font-size=\"2.8\" fill=\"{}\" text-anchor=\"middle\" dominant-baseline=\"central\">{}</text>\n",
+                lpt.x,
+                lpt.y,
                 stroke,
                 escape_xml(&conn.label)
             ));
         }
     }
 
+    // Foreground pass: Render shape captions on top of all wires so no wire crosses over text
+    for shape in &page.shapes {
+        if !is_layer_visible(page, &shape.layer) {
+            continue;
+        }
+        render_shape_caption_svg(page, shape, &mut svg);
+    }
+
     svg.push_str("</svg>\n");
     svg
 }
 
-fn render_shape_svg(page: &DiagramPage, shape: &DiagramShape, svg: &mut String) {
+fn render_shape_svg(_page: &DiagramPage, shape: &DiagramShape, svg: &mut String) {
     let stroke = rgba_hex(shape.stroke_color);
     let fill = rgba_hex(shape.fill_color);
     let fill_alpha = shape.fill_color[3] as f32 / 255.0;
@@ -306,18 +324,30 @@ fn render_shape_svg(page: &DiagramPage, shape: &DiagramShape, svg: &mut String) 
             }
         }
     }
+}
 
-    // Label / Dimension / Room area caption
+fn render_shape_caption_svg(page: &DiagramPage, shape: &DiagramShape, svg: &mut String) {
     let caption = shape_display_caption(page, shape);
     if !caption.is_empty() {
-        let label_pt = shape.label_position();
+        let stroke = rgba_hex(shape.stroke_color);
         let eff_pos = shape.effective_text_position();
+        let label_pt =
+            resolve_clean_label_position(shape, &page.connectors, caption.chars().count());
         let font_size = if eff_pos == crate::model::TextPosition::Center {
             let line_count = caption.lines().count().max(1) as f64;
             (shape.height / (line_count + 1.2)).clamp(2.5, 4.5)
         } else {
             3.0
         };
+        if eff_pos != crate::model::TextPosition::Center {
+            let half_w = (caption.chars().count() as f64 * 0.95).clamp(4.5, 24.0);
+            svg.push_str(&format!(
+                "  <rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"4.0\" rx=\"0.9\" fill=\"#ffffff\" fill-opacity=\"0.92\"/>\n",
+                label_pt.x - half_w,
+                label_pt.y - 2.0,
+                half_w * 2.0
+            ));
+        }
         svg.push_str(&format!(
             "  <text x=\"{:.2}\" y=\"{:.2}\" font-family=\"sans-serif\" font-size=\"{:.2}\" font-weight=\"bold\" fill=\"{}\" text-anchor=\"middle\" dominant-baseline=\"central\">{}</text>\n",
             label_pt.x,

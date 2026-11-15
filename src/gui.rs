@@ -4,7 +4,10 @@ use crate::model::{
     ArrowType, ConnectorStyle, DiagramConnector, DiagramDocument, DiagramPage, DiagramShape,
     DrawingScale, Point, PrimOp, TextAlign, TextPosition,
 };
-use crate::routing::{connector_hit_test, find_wire_jumps, update_all_connectors};
+use crate::routing::{
+    compute_connector_path, connector_hit_test, connector_label_position_smart, find_wire_jumps,
+    resolve_clean_label_position, update_all_connectors,
+};
 use crate::stencils::{built_in_stencils, instantiate_shape, StencilCategory, StencilItem};
 use crate::templates::{template_electrical_schematic, template_floorplan_and_sfs_elec};
 use crate::triangulate::draw_robust_path;
@@ -1630,15 +1633,94 @@ impl PhotonDiagramApp {
                     }
                 }
 
-                // Draw active wire preview while dragging a new connection
-                if let (Some((_, _, start_mm)), Some(cur_mm)) = (self.wiring_from, mouse_mm) {
-                    let target_mm = hovered_port.map(|(_, _, p)| p).unwrap_or(cur_mm);
-                    let s_pos = self.page_to_screen(origin, start_mm);
-                    let mid_pos = self.page_to_screen(origin, Point::new(target_mm.x, start_mm.y));
-                    let e_pos = self.page_to_screen(origin, target_mm);
+                // 3. Foreground Text Pass: Draw all connector labels and shape captions ON TOP of wires
+                // so no wire ever strikes through a label!
+                for conn in &page_snapshot.connectors {
+                    let is_vis = page_snapshot
+                        .layers
+                        .iter()
+                        .find(|l| l.name == conn.layer)
+                        .map(|l| l.visible)
+                        .unwrap_or(true);
+                    if is_vis {
+                        let is_sel = self.selected_connector_id == Some(conn.id);
+                        self.draw_connector_label_on_canvas(
+                            &painter,
+                            origin,
+                            &page_snapshot,
+                            conn,
+                            is_sel,
+                        );
+                    }
+                }
+                for shape in &page_snapshot.shapes {
+                    let is_vis = page_snapshot
+                        .layers
+                        .iter()
+                        .find(|l| l.name == shape.layer)
+                        .map(|l| l.visible)
+                        .unwrap_or(true);
+                    if is_vis {
+                        let is_selected = self.is_shape_selected(shape.id);
+                        self.draw_shape_caption_on_canvas(
+                            &painter,
+                            origin,
+                            &page_snapshot,
+                            shape,
+                            is_selected,
+                        );
+                    }
+                }
+
+                // Draw active wire preview while dragging a new connection (with full obstacle avoidance)
+                if let (Some((from_s, from_p, start_mm)), Some(cur_mm)) = (self.wiring_from, mouse_mm) {
+                    let (to_s, to_p, target_mm) = hovered_port
+                        .map(|(s, p, pt)| (Some(s), p, pt))
+                        .unwrap_or((None, 0, cur_mm));
+                    let mut start_dir = (0.0, 0.0);
+                    if let Some(fid) = from_s {
+                        if let Some(sh) = page_snapshot.shapes.iter().find(|s| s.id == fid) {
+                            let (_, d) = sh.port_world_pos_and_dir(from_p);
+                            start_dir = d;
+                        }
+                    }
+                    let mut end_dir = (0.0, 0.0);
+                    if let Some(tid) = to_s {
+                        if let Some(sh) = page_snapshot.shapes.iter().find(|s| s.id == tid) {
+                            let (_, d) = sh.port_world_pos_and_dir(to_p);
+                            end_dir = d;
+                        }
+                    }
+                    let temp_conn = DiagramConnector {
+                        id: 0,
+                        from_shape: from_s,
+                        from_port: from_p,
+                        from_pos: start_mm,
+                        to_shape: to_s,
+                        to_port: to_p,
+                        to_pos: target_mm,
+                        style: ConnectorStyle::Orthogonal,
+                        start_arrow: ArrowType::None,
+                        end_arrow: ArrowType::None,
+                        label: String::new(),
+                        stroke_color: [34, 197, 94, 255],
+                        stroke_width: 2.2,
+                        dashed: false,
+                        layer: String::new(),
+                        waypoints: Vec::new(),
+                    };
+                    let preview_pts = compute_connector_path(
+                        &temp_conn,
+                        start_dir,
+                        end_dir,
+                        &page_snapshot.shapes,
+                    );
+                    let screen_pts: Vec<Pos2> = preview_pts
+                        .into_iter()
+                        .map(|p| self.page_to_screen(origin, p))
+                        .collect();
                     let preview_stroke = Stroke::new(2.2_f32, Color32::from_rgb(34, 197, 94));
-                    painter.line_segment([s_pos, mid_pos], preview_stroke);
-                    painter.line_segment([mid_pos, e_pos], preview_stroke);
+                    painter.add(Shape::line(screen_pts, preview_stroke));
                 }
 
                 // Draw active creation box preview (Wall / Room / Dimension)
@@ -2206,6 +2288,44 @@ impl PhotonDiagramApp {
                     self.push_undo();
                     let cid = self.doc.alloc_id();
                     let page = self.doc.current_page_mut();
+
+                    // Choose smart IEC wire color based on connected port / component type
+                    let mut wire_color = [220, 38, 38, 255]; // Default +24V / Phase Red
+                    let mut port_hints = String::new();
+                    for (sid_opt, pidx) in [(from_s, from_p), (to_s, to_p)] {
+                        if let Some(sid) = sid_opt {
+                            if let Some(sh) = page.shapes.iter().find(|s| s.id == sid) {
+                                port_hints.push_str(&sh.stencil_id.to_lowercase());
+                                port_hints.push(' ');
+                                port_hints.push_str(&sh.label.to_lowercase());
+                                port_hints.push(' ');
+                                if let Some(port) = sh.ports.get(pidx) {
+                                    port_hints.push_str(&port.name.to_lowercase());
+                                    port_hints.push(' ');
+                                }
+                            }
+                        }
+                    }
+                    if port_hints.contains("elec_pe")
+                        || port_hints.contains("iec_pe")
+                        || port_hints.contains(" pe")
+                    {
+                        wire_color = [22, 163, 74, 255]; // Protective Earth Green
+                    } else if port_hints.contains("gnd")
+                        || port_hints.contains("0v")
+                        || port_hints.contains("miinus")
+                        || port_hints.contains("a2")
+                    {
+                        wire_color = [30, 41, 59, 255]; // 0V / GND Dark Slate
+                    } else if port_hints.contains("q1")
+                        || port_hints.contains("q2")
+                        || port_hints.contains("q3")
+                        || port_hints.contains("do1")
+                        || port_hints.contains("do2")
+                    {
+                        wire_color = [37, 99, 235, 255]; // PLC Control Output Blue
+                    }
+
                     page.connectors.push(DiagramConnector {
                         id: cid,
                         from_shape: from_s,
@@ -2218,7 +2338,7 @@ impl PhotonDiagramApp {
                         start_arrow: ArrowType::None,
                         end_arrow: ArrowType::None,
                         label: String::new(),
-                        stroke_color: [220, 38, 38, 255],
+                        stroke_color: wire_color,
                         stroke_width: 1.8,
                         dashed: false,
                         layer: "Sähkö & Kytkennät".to_string(),
@@ -2347,7 +2467,7 @@ impl PhotonDiagramApp {
         &self,
         painter: &egui::Painter,
         origin: Pos2,
-        page: &DiagramPage,
+        _page: &DiagramPage,
         shape: &DiagramShape,
         is_selected: bool,
     ) {
@@ -2529,11 +2649,58 @@ impl PhotonDiagramApp {
             }
         }
 
+        // Draw Selection Box & 8 Resize Handles
+        if is_selected {
+            let bb = shape.bounding_box();
+            let tl = self.page_to_screen(origin, Point::new(bb.min_x, bb.min_y));
+            let br = self.page_to_screen(origin, Point::new(bb.max_x, bb.max_y));
+            let sel_rect = Rect::from_min_max(tl, br).expand(2.0);
+            let sel_col = Color32::from_rgb(37, 99, 235);
+            painter.rect_stroke(
+                sel_rect,
+                CornerRadius::ZERO,
+                Stroke::new(1.5_f32, sel_col),
+                StrokeKind::Middle,
+            );
+
+            // Only draw individual resize handles when exactly one shape is selected
+            if self.selected_shape_ids.len() <= 1 {
+                for (_, hpt) in resize_handle_points(shape) {
+                    let hp = self.page_to_screen(origin, hpt);
+                    let hrect = Rect::from_center_size(hp, Vec2::splat(6.5));
+                    painter.rect_filled(hrect, CornerRadius::ZERO, Color32::WHITE);
+                    painter.rect_stroke(
+                        hrect,
+                        CornerRadius::ZERO,
+                        Stroke::new(1.5_f32, sel_col),
+                        StrokeKind::Middle,
+                    );
+                }
+            }
+        }
+    }
+
+    fn draw_shape_caption_on_canvas(
+        &self,
+        painter: &egui::Painter,
+        origin: Pos2,
+        page: &DiagramPage,
+        shape: &DiagramShape,
+        is_selected: bool,
+    ) {
+        let stroke_col = Color32::from_rgba_unmultiplied(
+            shape.stroke_color[0],
+            shape.stroke_color[1],
+            shape.stroke_color[2],
+            shape.stroke_color[3],
+        );
+
         // Draw component label / value or live architectural room area / dimension
         let caption = shape_display_caption(page, shape);
         if !caption.is_empty() {
             let eff_pos = shape.effective_text_position();
-            let label_pt = shape.label_position();
+            let label_pt =
+                resolve_clean_label_position(shape, &page.connectors, caption.chars().count());
             let sp = self.page_to_screen(origin, label_pt);
 
             let (text_col, font_px) = if eff_pos == TextPosition::Center {
@@ -2610,12 +2777,44 @@ impl PhotonDiagramApp {
                     };
                     Pos2::new(x, y)
                 }
-                TextPosition::Top => Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y),
-                TextPosition::Bottom => Pos2::new(sp.x - galley.rect.center().x, sp.y),
+                TextPosition::Top => {
+                    if (label_pt.y - shape.y).abs() < 1.0 {
+                        // Label was nudged horizontally to the side of the component
+                        Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y * 0.5)
+                    } else if label_pt.y > shape.y {
+                        // Label was flipped below the component
+                        Pos2::new(sp.x - galley.rect.center().x, sp.y)
+                    } else {
+                        Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y)
+                    }
+                }
+                TextPosition::Bottom => {
+                    if (label_pt.y - shape.y).abs() < 1.0 {
+                        Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y * 0.5)
+                    } else if label_pt.y < shape.y {
+                        Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y)
+                    } else {
+                        Pos2::new(sp.x - galley.rect.center().x, sp.y)
+                    }
+                }
                 TextPosition::Hidden | TextPosition::Auto => {
                     Pos2::new(sp.x - galley.rect.center().x, sp.y - g_size.y * 0.5)
                 }
             };
+
+            // Draw clean paper halo pill behind external component labels so wires never bleed through text
+            if eff_pos != TextPosition::Center || shape.is_dimension {
+                let bg_rect = Rect::from_min_size(
+                    Pos2::new(galley_pos.x + galley.rect.min.x, galley_pos.y + galley.rect.min.y),
+                    g_size,
+                )
+                .expand2(Vec2::new(3.0, 1.5));
+                painter.rect_filled(
+                    bg_rect,
+                    CornerRadius::same(3),
+                    Color32::from_rgba_unmultiplied(255, 255, 255, 236),
+                );
+            }
 
             painter.galley(galley_pos, galley, text_col);
         } else if shape.stencil_id == "note_textbox"
@@ -2631,36 +2830,6 @@ impl PhotonDiagramApp {
                 FontId::proportional((10.0 * 0.3528 * self.zoom_px_per_mm).clamp(9.0, 14.0)),
                 Color32::from_rgba_unmultiplied(148, 163, 184, 180),
             );
-        }
-
-        // Draw Selection Box & 8 Resize Handles
-        if is_selected {
-            let bb = shape.bounding_box();
-            let tl = self.page_to_screen(origin, Point::new(bb.min_x, bb.min_y));
-            let br = self.page_to_screen(origin, Point::new(bb.max_x, bb.max_y));
-            let sel_rect = Rect::from_min_max(tl, br).expand(2.0);
-            let sel_col = Color32::from_rgb(37, 99, 235);
-            painter.rect_stroke(
-                sel_rect,
-                CornerRadius::ZERO,
-                Stroke::new(1.5_f32, sel_col),
-                StrokeKind::Middle,
-            );
-
-            // Only draw individual resize handles when exactly one shape is selected
-            if self.selected_shape_ids.len() <= 1 {
-                for (_, hpt) in resize_handle_points(shape) {
-                    let hp = self.page_to_screen(origin, hpt);
-                    let hrect = Rect::from_center_size(hp, Vec2::splat(6.5));
-                    painter.rect_filled(hrect, CornerRadius::ZERO, Color32::WHITE);
-                    painter.rect_stroke(
-                        hrect,
-                        CornerRadius::ZERO,
-                        Stroke::new(1.5_f32, sel_col),
-                        StrokeKind::Middle,
-                    );
-                }
-            }
         }
     }
 
@@ -2751,21 +2920,53 @@ impl PhotonDiagramApp {
                 Stroke::NONE,
             ));
         }
+    }
 
-        if !conn.label.is_empty() && screen_pts.len() >= 2 {
-            let mid_idx = screen_pts.len() / 2;
-            let mid = Pos2::new(
-                (screen_pts[mid_idx - 1].x + screen_pts[mid_idx].x) * 0.5,
-                (screen_pts[mid_idx - 1].y + screen_pts[mid_idx].y) * 0.5 - 8.0,
-            );
-            painter.text(
-                mid,
-                egui::Align2::CENTER_CENTER,
-                &conn.label,
-                FontId::proportional(10.5),
-                col,
-            );
+    fn draw_connector_label_on_canvas(
+        &self,
+        painter: &egui::Painter,
+        origin: Pos2,
+        page: &DiagramPage,
+        conn: &DiagramConnector,
+        is_selected: bool,
+    ) {
+        if conn.label.is_empty() || conn.waypoints.len() < 2 {
+            return;
         }
+        let col = if is_selected {
+            Color32::from_rgb(37, 99, 235)
+        } else {
+            Color32::from_rgba_unmultiplied(
+                conn.stroke_color[0],
+                conn.stroke_color[1],
+                conn.stroke_color[2],
+                conn.stroke_color[3],
+            )
+        };
+        let font_px = (3.1 * self.zoom_px_per_mm).clamp(9.5, 14.5);
+        let galley = painter.layout_no_wrap(
+            conn.label.clone(),
+            FontId::proportional(font_px),
+            col,
+        );
+        let g_size = galley.size();
+        let half_w_mm = ((g_size.x * 0.5) / self.zoom_px_per_mm.max(1.0)) as f64 + 1.0;
+
+        let lpt = connector_label_position_smart(
+            &conn.waypoints,
+            &page.connectors,
+            &page.shapes,
+            half_w_mm,
+        );
+        let sp = self.page_to_screen(origin, lpt);
+        let pos = Pos2::new(sp.x - g_size.x * 0.5, sp.y - g_size.y * 0.5);
+        let bg_rect = Rect::from_min_size(pos, g_size).expand2(Vec2::new(3.0, 1.5));
+        painter.rect_filled(
+            bg_rect,
+            CornerRadius::same(3),
+            Color32::from_rgba_unmultiplied(255, 255, 255, 236),
+        );
+        painter.galley(pos, galley, col);
     }
 }
 

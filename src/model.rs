@@ -373,6 +373,12 @@ impl DiagramShape {
                     || self.name.to_lowercase().contains("note")
                 {
                     TextPosition::Center
+                } else if self.stencil_id == "elec_gnd"
+                    || self.stencil_id == "iec_gnd"
+                    || self.stencil_id == "elec_pe"
+                    || self.stencil_id == "iec_pe"
+                {
+                    TextPosition::Bottom
                 } else if self.stencil_id.starts_with("elec_")
                     || self.stencil_id.starts_with("inst_")
                     || self.stencil_id.starts_with("iec_")
