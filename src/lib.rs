@@ -106,8 +106,9 @@ mod tests {
         assert_eq!(loaded.pages[0].shapes.len(), doc.pages[0].shapes.len());
         assert_eq!(loaded.pages[0].scale, DrawingScale::Scale1To50);
 
-        // 2. Strip photon_vision.json to test pure MS Visio XML parsing (`visio/pages/page1.xml`)
+        // 2. Strip lossless JSON metadata to test pure MS Visio XML parsing (`visio/pages/page1.xml`)
         let mut archive = ZipArchive::from_bytes(&bytes).unwrap();
+        archive.files.remove("visio/photon_diagram.json");
         archive.files.remove("visio/photon_vision.json");
         let pure_vsdx_bytes = archive.to_bytes();
         let parsed_from_xml =
@@ -148,102 +149,116 @@ mod tests {
         assert_eq!(imported[0].name, "CustomContactor");
         assert!(imported[0].category == StencilCategory::ImportedVisio("test_lib".to_string()));
 
-        // Also test with a real downloaded VSSX file if present on disk
-        let real_vssx = std::path::Path::new("/Users/nikopietinen/Downloads/visiostencilfactory-master/stencils/azure-docs.vssx");
-        if real_vssx.exists() {
-            let file_bytes = std::fs::read(real_vssx).unwrap();
-            let real_imported = import_vssx_stencils(&file_bytes, "azure-docs").unwrap();
-            assert!(real_imported.len() > 100);
-            assert!(real_imported.iter().any(|s| s.name.contains("active directory")));
-            assert!(real_imported.iter().all(|s| s.name != "Shape"));
+        // Also test with real downloaded VSSX files if VSSX_TEST_DIR is configured
+        let vssx_dir = std::env::var("VSSX_TEST_DIR")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                let default_path = std::path::PathBuf::from("tests/stencils");
+                if default_path.exists() {
+                    Some(default_path)
+                } else {
+                    None
+                }
+            });
 
-            // Verify 'search' retains its vector ellipse and does NOT have an occluding dummy bounding box
-            let search = real_imported.iter().find(|s| s.name == "search").expect("Missing 'search'");
-            assert_eq!(search.default_label, "search");
-            assert!(
-                search.geometry.iter().any(|op| matches!(op, crate::model::PrimOp::Ellipse { .. })),
-                "Search must contain an Ellipse vector primitive"
-            );
-            assert!(
-                !search.geometry.iter().any(|op| {
-                    if let crate::model::PrimOp::Path { points, fill_color, stroke_color, .. } = op {
-                        points.len() == 5 && fill_color.is_none() && stroke_color.is_none()
-                    } else {
-                        false
-                    }
-                }),
-                "Search must not have invisible dummy bounding box path"
-            );
+        if let Some(ref dir) = vssx_dir {
+            let real_vssx = dir.join("azure-docs.vssx");
+            if real_vssx.exists() {
+                let file_bytes = std::fs::read(&real_vssx).unwrap();
+                let real_imported = import_vssx_stencils(&file_bytes, "azure-docs").unwrap();
+                assert!(real_imported.len() > 100);
+                assert!(real_imported.iter().any(|s| s.name.contains("active directory")));
+                assert!(real_imported.iter().all(|s| s.name != "Shape"));
 
-            // Verify 'notification hubs' uses clean monogram placeholder badge ("NH")
-            let notif = real_imported.iter().find(|s| s.name == "notification hubs").expect("Missing 'notification hubs'");
-            assert_eq!(notif.default_label, "notification hubs");
-            assert!(
-                notif.geometry.iter().any(|op| {
-                    if let crate::model::PrimOp::Text { text, .. } = op {
-                        text == "NH"
-                    } else {
-                        false
-                    }
-                }),
-                "Notification hubs must have monogram 'NH'"
-            );
+                // Verify 'search' retains its vector ellipse and does NOT have an occluding dummy bounding box
+                let search = real_imported.iter().find(|s| s.name == "search").expect("Missing 'search'");
+                assert_eq!(search.default_label, "search");
+                assert!(
+                    search.geometry.iter().any(|op| matches!(op, crate::model::PrimOp::Ellipse { .. })),
+                    "Search must contain an Ellipse vector primitive"
+                );
+                assert!(
+                    !search.geometry.iter().any(|op| {
+                        if let crate::model::PrimOp::Path { points, fill_color, stroke_color, .. } = op {
+                            points.len() == 5 && fill_color.is_none() && stroke_color.is_none()
+                        } else {
+                            false
+                        }
+                    }),
+                    "Search must not have invisible dummy bounding box path"
+                );
 
-            // Verify 'media services' uses clean monogram placeholder badge ("MS")
-            let media = real_imported.iter().find(|s| s.name == "media services").expect("Missing 'media services'");
-            assert_eq!(media.default_label, "media services");
-            assert!(
-                media.geometry.iter().any(|op| {
-                    if let crate::model::PrimOp::Text { text, .. } = op {
-                        text == "MS"
-                    } else {
-                        false
-                    }
-                }),
-                "Media services must have monogram 'MS'"
-            );
-        }
+                // Verify 'notification hubs' uses clean monogram placeholder badge ("NH")
+                let notif = real_imported.iter().find(|s| s.name == "notification hubs").expect("Missing 'notification hubs'");
+                assert_eq!(notif.default_label, "notification hubs");
+                assert!(
+                    notif.geometry.iter().any(|op| {
+                        if let crate::model::PrimOp::Text { text, .. } = op {
+                            text == "NH"
+                        } else {
+                            false
+                        }
+                    }),
+                    "Notification hubs must have monogram 'NH'"
+                );
 
-        let logos_vssx = std::path::Path::new("/Users/nikopietinen/Downloads/visiostencilfactory-master/stencils/logos.vssx");
-        if logos_vssx.exists() {
-            let file_bytes = std::fs::read(logos_vssx).unwrap();
-            let logos_imported = import_vssx_stencils(&file_bytes, "logos").unwrap();
-            assert!(logos_imported.len() >= 100);
-            assert!(logos_imported.iter().any(|s| s.name.contains("android")));
-            assert!(logos_imported.iter().any(|s| s.name.contains("angular")));
-            assert!(logos_imported.iter().all(|s| s.name != "Shape"));
-            let android = logos_imported.iter().find(|s| s.name == "android-1").unwrap();
-            assert!(!android.geometry.is_empty());
-        }
+                // Verify 'media services' uses clean monogram placeholder badge ("MS")
+                let media = real_imported.iter().find(|s| s.name == "media services").expect("Missing 'media services'");
+                assert_eq!(media.default_label, "media services");
+                assert!(
+                    media.geometry.iter().any(|op| {
+                        if let crate::model::PrimOp::Text { text, .. } = op {
+                            text == "MS"
+                        } else {
+                            false
+                        }
+                    }),
+                    "Media services must have monogram 'MS'"
+                );
+            }
 
-        // Test general.vssx and specifically Free Services
-        let gen_vssx = std::path::Path::new("/Users/nikopietinen/Downloads/visiostencilfactory-master/stencils/azure-icons/general.vssx");
-        if gen_vssx.exists() {
-            let file_bytes = std::fs::read(gen_vssx).unwrap();
-            let gen_imported = import_vssx_stencils(&file_bytes, "general").unwrap();
-            let free_svc = gen_imported.iter().find(|s| s.name.to_lowercase().contains("free services")).expect("Missing Free Services");
-            
-            // Verify all paths are well-formed and can be triangulated without miter explosion
-            let mut path_count = 0;
-            for op in &free_svc.geometry {
-                if let crate::model::PrimOp::Path { points, closed, .. } = op {
-                    path_count += 1;
-                    if *closed && points.len() >= 3 {
-                        let pos_pts: Vec<eframe::egui::Pos2> = points
-                            .iter()
-                            .map(|(x, y)| eframe::egui::Pos2::new(*x as f32, *y as f32))
-                            .collect();
-                        let tris = crate::triangulate::triangulate_polygon(&pos_pts);
-                        assert!(!tris.is_empty(), "Failed to triangulate Free Services path");
-                        for tri in tris {
-                            for idx in tri {
-                                assert!((idx as usize) < pos_pts.len());
+            let logos_vssx = dir.join("logos.vssx");
+            if logos_vssx.exists() {
+                let file_bytes = std::fs::read(&logos_vssx).unwrap();
+                let logos_imported = import_vssx_stencils(&file_bytes, "logos").unwrap();
+                assert!(logos_imported.len() >= 100);
+                assert!(logos_imported.iter().any(|s| s.name.contains("android")));
+                assert!(logos_imported.iter().any(|s| s.name.contains("angular")));
+                assert!(logos_imported.iter().all(|s| s.name != "Shape"));
+                let android = logos_imported.iter().find(|s| s.name == "android-1").unwrap();
+                assert!(!android.geometry.is_empty());
+            }
+
+            // Test general.vssx and specifically Free Services
+            let gen_vssx = dir.join("azure-icons/general.vssx");
+            if gen_vssx.exists() {
+                let file_bytes = std::fs::read(&gen_vssx).unwrap();
+                let gen_imported = import_vssx_stencils(&file_bytes, "general").unwrap();
+                let free_svc = gen_imported.iter().find(|s| s.name.to_lowercase().contains("free services")).expect("Missing Free Services");
+                
+                // Verify all paths are well-formed and can be triangulated without miter explosion
+                let mut path_count = 0;
+                for op in &free_svc.geometry {
+                    if let crate::model::PrimOp::Path { points, closed, .. } = op {
+                        path_count += 1;
+                        if *closed && points.len() >= 3 {
+                            let pos_pts: Vec<eframe::egui::Pos2> = points
+                                .iter()
+                                .map(|(x, y)| eframe::egui::Pos2::new(*x as f32, *y as f32))
+                                .collect();
+                            let tris = crate::triangulate::triangulate_polygon(&pos_pts);
+                            assert!(!tris.is_empty(), "Failed to triangulate Free Services path");
+                            for tri in tris {
+                                for idx in tri {
+                                    assert!((idx as usize) < pos_pts.len());
+                                }
                             }
                         }
                     }
                 }
+                assert!(path_count > 0, "Free Services must contain vector paths");
             }
-            assert!(path_count > 0, "Free Services should have vector paths");
         }
     }
 

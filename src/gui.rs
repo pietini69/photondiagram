@@ -44,7 +44,7 @@ pub enum FileAction {
     SetStatus(String),
 }
 
-pub struct PhotonVisionApp {
+pub struct PhotonDiagramApp {
     pub doc: DiagramDocument,
     pub stencils: Vec<StencilItem>,
     pub stencil_search: String,
@@ -91,7 +91,7 @@ pub struct PhotonVisionApp {
     redo_stack: Vec<DiagramDocument>,
 }
 
-impl Default for PhotonVisionApp {
+impl Default for PhotonDiagramApp {
     fn default() -> Self {
         let (file_action_tx, file_action_rx) = std::sync::mpsc::channel();
         let mut doc = template_electrical_schematic();
@@ -151,7 +151,7 @@ impl Default for PhotonVisionApp {
     }
 }
 
-impl PhotonVisionApp {
+impl PhotonDiagramApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut fonts = egui::FontDefinitions::default();
         fonts
@@ -360,7 +360,7 @@ impl PhotonVisionApp {
                     )
                     .add_filter("PhotonCAM / LightBurn (.lbrn2)", &["lbrn2", "lbrn"])
                     .add_filter("Microsoft Visio (.vsdx, .vdx, .vsd)", &["vsdx", "vdx", "vsd"])
-                    .add_filter("PhotonVision (.pvis)", &["pvis"])
+                    .add_filter("PhotonDiagram (.pdiag, .pvis)", &["pdiag", "pvis"])
                     .pick_file()
                     .await
                 {
@@ -424,7 +424,7 @@ impl PhotonVisionApp {
     }
 }
 
-impl eframe::App for PhotonVisionApp {
+impl eframe::App for PhotonDiagramApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Process asynchronous file dialog actions
         while let Ok(action) = self.file_action_rx.try_recv() {
@@ -565,7 +565,7 @@ impl eframe::App for PhotonVisionApp {
     }
 }
 
-impl PhotonVisionApp {
+impl PhotonDiagramApp {
     fn render_top_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // 1. Menu bar
@@ -594,9 +594,9 @@ impl PhotonVisionApp {
                         self.import_vssx_dialog(ui.ctx());
                     }
                     ui.separator();
-                    if ui.button("Tallenna PhotonVision (.pvis)...").clicked() {
+                    if ui.button("Tallenna PhotonDiagram (.pdiag)...").clicked() {
                         ui.close_menu();
-                        self.save_file_as_dialog("pvis", "PhotonVision (.pvis)", ui.ctx());
+                        self.save_file_as_dialog("pdiag", "PhotonDiagram (.pdiag)", ui.ctx());
                     }
                     if ui
                         .button("Tallenna Microsoft Visio (.vsdx)...")

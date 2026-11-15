@@ -1,6 +1,6 @@
 //! PhotonCAM / LightBurn (.lbrn2) import and export integration.
 //!
-//! Enables seamless round-trip CAD/CAM interoperability between PhotonVision
+//! Enables seamless round-trip CAD/CAM interoperability between PhotonDiagram
 //! and PhotonCAM (laser cutting, CNC routing, engraving, marking, and relief).
 
 use crate::formats::export::shape_display_caption;

@@ -1,4 +1,4 @@
-wing: photonvision
+wing: photondiagram
 rooms:
 - name: src
   description: Rust source files (GUI, CAD engine, models, formats, stencils)

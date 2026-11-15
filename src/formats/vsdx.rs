@@ -13,9 +13,12 @@ const INCH_TO_MM: f64 = 25.4;
 pub fn read_vsdx_bytes(bytes: &[u8]) -> Result<DiagramDocument, String> {
     let archive = ZipArchive::from_bytes(bytes)?;
 
-    // Fast path: if this .vsdx was saved by PhotonVision and includes our lossless metadata entry,
+    // Fast path: if this .vsdx was saved by PhotonDiagram and includes our lossless metadata entry,
     // restore the full document directly while remaining 100% compatible with MS Visio!
-    if let Some(json_str) = archive.get_text("visio/photon_vision.json") {
+    if let Some(json_str) = archive
+        .get_text("visio/photon_diagram.json")
+        .or_else(|| archive.get_text("visio/photon_vision.json"))
+    {
         if let Ok(doc) = serde_json::from_str::<DiagramDocument>(&json_str) {
             return Ok(doc);
         }
@@ -1241,9 +1244,10 @@ pub fn write_vsdx_bytes(doc: &DiagramDocument) -> Result<Vec<u8>, String> {
     zip.insert("visio/pages/pages.xml", pages_xml.into_bytes());
     zip.insert("visio/pages/_rels/pages.xml.rels", pages_rels.into_bytes());
 
-    // 6. Also embed lossless PhotonVision JSON inside the package so reopening in PhotonVision
+    // 6. Also embed lossless PhotonDiagram JSON inside the package so reopening in PhotonDiagram
     // restores all custom SFS/IEC stencils, architectural scales, and layers 100% intact.
     if let Ok(json_bytes) = serde_json::to_vec_pretty(doc) {
+        zip.insert("visio/photon_diagram.json", json_bytes.clone());
         zip.insert("visio/photon_vision.json", json_bytes);
     }
 

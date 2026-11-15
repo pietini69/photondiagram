@@ -27,7 +27,7 @@ def build_masterpiece():
     mask_np = np.clip(1.0 - (dist - 1.0) * (rx / 4.0), 0.0, 1.0)
     
     # 1. Base: Load AI Concept and fit into squircle
-    ai_path = "/Volumes/Dataa/Ohjelmointi/ProjektitRust/photon_vision/assets/icon_ai_concept.png"
+    ai_path = "/Volumes/Dataa/Ohjelmointi/ProjektitRust/photon_diagram/assets/icon_ai_concept.png"
     ai_raw = Image.open(ai_path).convert("RGBA")
     # Enhance contrast and saturation slightly
     ai_raw = ImageEnhance.Contrast(ai_raw).enhance(1.15)
@@ -213,7 +213,7 @@ def build_masterpiece():
     # Downsample to 1024x1024 Lanczos
     master_1024 = final_canvas.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
     
-    out_dir = "/Volumes/Dataa/Ohjelmointi/ProjektitRust/photon_vision/assets"
+    out_dir = "/Volumes/Dataa/Ohjelmointi/ProjektitRust/photon_diagram/assets"
     master_path = os.path.join(out_dir, "icon_1024.png")
     master_1024.save(master_path, "PNG")
     print(f"🌟 Uusi mestariteos-ikoni tallennettu: {master_path}")
@@ -223,7 +223,7 @@ def build_masterpiece():
     master_1024.resize((256, 256), Image.Resampling.LANCZOS).save(os.path.join(out_dir, "icon_256.png"), "PNG")
     
     # Update iconset
-    iconset_dir = os.path.join(out_dir, "PhotonVision.iconset")
+    iconset_dir = os.path.join(out_dir, "PhotonDiagram.iconset")
     sizes = [
         (16, "icon_16x16.png"),
         (32, "icon_16x16@2x.png"),
@@ -240,10 +240,10 @@ def build_masterpiece():
         resized = master_1024.resize((s, s), Image.Resampling.LANCZOS)
         resized.save(os.path.join(iconset_dir, name), "PNG")
         
-    icns_path = os.path.join(out_dir, "PhotonVision.icns")
+    icns_path = os.path.join(out_dir, "PhotonDiagram.icns")
     res = subprocess.run(["iconutil", "-c", "icns", iconset_dir, "-o", icns_path], capture_output=True, text=True)
     if res.returncode == 0:
-        print(f"🚀 PhotonVision.icns päivitetty: {icns_path} ({os.path.getsize(icns_path)} tavua)")
+        print(f"🚀 PhotonDiagram.icns päivitetty: {icns_path} ({os.path.getsize(icns_path)} tavua)")
     else:
         print(f"Virhe iconutil: {res.stderr}")
 

@@ -1,6 +1,6 @@
 use eframe::egui;
-use photon_vision::formats::load_document_from_path;
-use photon_vision::gui::PhotonVisionApp;
+use photon_diagram::formats::load_document_from_path;
+use photon_diagram::gui::PhotonDiagramApp;
 use std::path::PathBuf;
 
 fn main() -> eframe::Result<()> {
@@ -12,7 +12,7 @@ fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1480.0, 920.0])
         .with_min_inner_size([960.0, 620.0])
-        .with_title("PhotonVision — Sähkökaaviot, Pohjapiirustukset & Microsoft Visio (.vsdx/.vdx/.vsd)");
+        .with_title("PhotonDiagram — Sähkökaaviot, Pohjapiirustukset & Kaavio-CAD (.vsdx/.vdx/.vsd)");
 
     if let Some(icon) = icon_data {
         viewport = viewport.with_icon(icon);
@@ -26,10 +26,10 @@ fn main() -> eframe::Result<()> {
     let cli_file = std::env::args().nth(1).map(PathBuf::from);
 
     eframe::run_native(
-        "PhotonVision",
+        "PhotonDiagram",
         native_options,
         Box::new(move |cc| {
-            let mut app = PhotonVisionApp::new(cc);
+            let mut app = PhotonDiagramApp::new(cc);
             if let Some(path) = cli_file {
                 if let Ok(doc) = load_document_from_path(&path) {
                     app.doc = doc;

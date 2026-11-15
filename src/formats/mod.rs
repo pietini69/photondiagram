@@ -20,8 +20,8 @@ pub fn load_document_from_path(path: &Path) -> Result<DiagramDocument, String> {
     let bytes = fs::read(path).map_err(|e| format!("Tiedoston lukuvirhe ({:?}): {}", path, e))?;
 
     match ext.as_str() {
-        "pvis" | "json" => serde_json::from_slice::<DiagramDocument>(&bytes)
-            .map_err(|e| format!("PhotonVision JSON -virhe: {}", e)),
+        "pdiag" | "pvis" | "json" => serde_json::from_slice::<DiagramDocument>(&bytes)
+            .map_err(|e| format!("PhotonDiagram JSON -virhe: {}", e)),
         "lbrn2" | "lbrn" => photoncam::import_lbrn2_bytes(&bytes),
         "vsdx" => vsdx::read_vsdx_bytes(&bytes),
         "vdx" | "xml" => {
