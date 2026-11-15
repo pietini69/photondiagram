@@ -4,6 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](#downloads)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-dca282?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![AlternativeTo](https://img.shields.io/badge/find%20on-AlternativeTo-2088ff?style=flat-square&logo=alternativeto&logoColor=white)](https://alternativeto.net/software/photondiagram/)
 
 **PhotonDiagram** is a modern, high-performance, native technical diagramming, electrical schematic, and 2D CAD application engineered from scratch in **Rust**.
 
