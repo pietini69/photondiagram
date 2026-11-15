@@ -10,7 +10,11 @@
 Designed as a lightweight, subscription-free alternative to Microsoft Visio, AutoCAD, and heavy web-based diagramming tools, PhotonDiagram launches instantly, renders complex drawings at smooth 60+ FPS on any hardware, and features deep interoperability with industry CAD/CAM formats — including full `.vsdx` roundtripping and direct export to **PhotonCAM / LightBurn** (`.lbrn2`).
 
 <p align="center">
-  <img src="assets/icon_512.png" alt="PhotonDiagram Icon" width="160" />
+  <img src="assets/icon_512.png" alt="PhotonDiagram Icon" width="140" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshot_en.png" alt="PhotonDiagram Screenshot (English UI)" width="920" />
 </p>
 
 ---
