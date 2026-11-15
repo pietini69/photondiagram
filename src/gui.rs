@@ -3253,7 +3253,6 @@ fn draw_stencil_mini_preview(painter: &egui::Painter, rect: Rect, item: &Stencil
                     stroke.color,
                 );
             }
-            _ => {}
         }
     }
 }
