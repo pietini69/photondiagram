@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use eframe::egui;
 use photon_diagram::formats::load_document_from_path;
 use photon_diagram::gui::PhotonDiagramApp;
